@@ -1,0 +1,23 @@
+# --- App / UI ---
+streamlit==1.54.0
+
+# --- OpenAI / Azure OpenAI ---
+openai==2.21.0
+
+# --- Env vars ---
+python-dotenv==1.2.1
+
+# --- Data / artifacts ---
+numpy==2.4.2
+pandas==3.0.1
+pyarrow==23.0.1
+
+# --- Retrieval / embedding / NLI ---
+torch==2.10.0
+transformers==5.2.0
+sentence-transformers==5.2.3
+huggingface-hub==1.4.1
+hnswlib==0.8.0
+
+# --- Firebase ---
+firebase-admin==7.1.0

@@ -1,0 +1,21 @@
+# secrets
+.env
+*.json
+*service_account*
+
+# local artifacts (downloaded from HF at runtime)
+english/
+*.npy
+*.parquet
+*.bin
+
+# caches
+__pycache__/
+*.pyc
+.cache/
+.huggingface/
+
+# git + misc
+.git
+.gitignore
+README.md

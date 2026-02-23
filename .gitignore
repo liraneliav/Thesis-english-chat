@@ -1,0 +1,30 @@
+# secrets
+.env
+*.json
+*service_account*
+
+# local artifacts / data
+english/
+*.npy
+*.parquet
+*.bin
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# common envs
+.venv/
+venv/
+
+# optional caches
+.cache/
+.huggingface/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
