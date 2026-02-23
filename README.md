@@ -22,8 +22,9 @@ python -m venv .venv
 # source .venv/bin/activate
 
 pip install -r requirements.txt
-
+```
 ### 2) Create a file named .env in the project root
+```bash
 # Azure OpenAI
 AZURE_OPENAI_API_KEY=YOUR_AZURE_KEY
 ENDPOINT_URL=https://YOUR-RESOURCE.openai.azure.com/
@@ -36,6 +37,8 @@ HF_TOKEN=YOUR_HF_TOKEN
 
 # Firebase: path to service account json file (local dev)
 FIREBASE_SERVICE_ACCOUNT_ENGLISH=/absolute/path/to/firebase-service-account.json
-
+```
 ### 3) Run the app
+```bash
 streamlit run chat_english.py
+```
