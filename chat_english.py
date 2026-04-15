@@ -27,11 +27,31 @@ client = AzureOpenAI(
 )
 
 @st.cache_resource(show_spinner=False)
-def load_english_cached():
+def load_english_cached_blm():
     #returns meta, embs, index, encoder
     return load_english(
-        "./english",
-        repo_id="Liran73/english-opposite-artifacts",
+        "./english_blm",
+        repo_id="Liran73/english-blm",#english-opposite-artifacts",
+        repo_type="dataset",
+        hf_token_env="HF_TOKEN",
+    )
+
+@st.cache_resource(show_spinner=False)
+def load_english_cached_guns():
+    #returns meta, embs, index, encoder
+    return load_english(
+        "./english_guns",
+        repo_id="Liran73/english-guns",#english-opposite-artifacts",
+        repo_type="dataset",
+        hf_token_env="HF_TOKEN",
+    )
+
+@st.cache_resource(show_spinner=False)
+def load_english_cached_samesex():
+    #returns meta, embs, index, encoder
+    return load_english(
+        "./english_samesex",
+        repo_id="Liran73/english-samesex",#english-opposite-artifacts",
         repo_type="dataset",
         hf_token_env="HF_TOKEN",
     )
@@ -87,17 +107,18 @@ system_prompt_chat2_blm = ""
 system_prompt_chat2_guns = ""
 system_prompt_chat2_samesex = ""
 
-meta, embs, index, encoder = None, None, None, None
+meta_blm, meta_guns, meta_samesex = None, None, None
 
 def ensure_artifacts_loaded():
     if st.session_state.get("artifacts_loaded"):
         return
 
-    meta, embs, index, encoder = load_english_cached()
-    st.session_state["meta"] = meta
-    st.session_state["embs"] = embs
-    st.session_state["index"] = index
-    st.session_state["encoder"] = encoder
+    meta_blm = load_english_cached_blm()#, embs, index, encoder*/ = load_english_cached()
+    st.session_state["meta_blm"] = meta_blm
+    meta_guns = load_english_cached_guns()
+    st.session_state["meta_guns"] = meta_guns
+    meta_samesex = load_english_cached_samesex()
+    st.session_state["meta_samesex"] = meta_samesex
     st.session_state["artifacts_loaded"] = True
 
 def init_state():
@@ -139,10 +160,12 @@ def init_state():
     ss.setdefault("chat_number_start", random.randint(1, 2))
     print(f"first chat number = {st.session_state.chat_number_start}")
 
-    ss.setdefault("meta", None)
-    ss.setdefault("embs", None)
-    ss.setdefault("index", None)
-    ss.setdefault("encoder", None)
+    ss.setdefault("meta_blm", None)
+    ss.setdefault("meta_guns", None)
+    ss.setdefault("meta_samesex", None)
+    # ss.setdefault("embs", None)
+    # ss.setdefault("index", None)
+    # ss.setdefault("encoder", None)
     ss.setdefault("artifacts_loaded", False)
 
     if not ss["artifacts_loaded"]:
@@ -363,7 +386,7 @@ def build_chat_env_blm():
                 opposite_comments, timings = run_opposite_pipeline_and_render(
                     user_opinion=user_text,
                     topic_keywords=topic_map[key], 
-                    meta=st.session_state.meta, embs=st.session_state.embs, index=st.session_state.index, encoder=st.session_state.encoder,
+                    meta=st.session_state.meta_blm,
                     on_progress=on_progress)
                 
                 for i, item in enumerate(opposite_comments, 1):
@@ -417,7 +440,7 @@ def build_chat_env_guns():
                 opposite_comments, timings = run_opposite_pipeline_and_render(
                     user_opinion=user_text,
                     topic_keywords=topic_map[key], 
-                    meta=st.session_state.meta, embs=st.session_state.embs, index=st.session_state.index, encoder=st.session_state.encoder,
+                    meta=st.session_state.meta_guns,
                     on_progress=on_progress)
                 
                 for i, item in enumerate(opposite_comments, 1):
@@ -471,7 +494,7 @@ def build_chat_env_samesex():
                 opposite_comments, timings = run_opposite_pipeline_and_render(
                     user_opinion=user_text,
                     topic_keywords=topic_map[key], 
-                    meta=st.session_state.meta, embs=st.session_state.embs, index=st.session_state.index, encoder=st.session_state.encoder,
+                    meta=st.session_state.meta_samesex,
                     on_progress=on_progress)
                 
                 for i, item in enumerate(opposite_comments, 1):
@@ -1208,5 +1231,4 @@ elif (st.session_state.chat_number_start == 2) and (stage == "thanks"):
 
 elif (st.session_state.chat_number_start == 2) and (stage == "not_save"):
         # require full survey completion
-
         render_not_save()
