@@ -397,33 +397,33 @@ def load_english(
     # Try to bring files from HF if missing
     _ensure_artifacts_from_hf(ART_DIR, repo_id=repo_id, repo_type=repo_type, token_env=hf_token_env)
 
-    CFG_PATH = ART_DIR / "config.json"
+    #CFG_PATH = ART_DIR / "config.json"
     META_PATH = ART_DIR / "meta.parquet"
-    EMB_PATH  = ART_DIR / "embeddings.npy"
-    HNSW_PATH = ART_DIR / "hnsw_cosine.bin"  # optional
+    #EMB_PATH  = ART_DIR / "embeddings.npy"
+    #HNSW_PATH = ART_DIR / "hnsw_cosine.bin"  # optional
 
-    missing = [p.name for p in (CFG_PATH, META_PATH, EMB_PATH) if not p.exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"Missing artifacts in {ART_DIR} → {', '.join(missing)}. "
-            f"If you host them on Hugging Face, pass repo_id='user/repo' (and set HF_TOKEN if private)."
-        )
+    # missing = [p.name for p in (CFG_PATH, META_PATH, EMB_PATH) if not p.exists()]
+    # if missing:
+    #     raise FileNotFoundError(
+    #         f"Missing artifacts in {ART_DIR} → {', '.join(missing)}. "
+    #         f"If you host them on Hugging Face, pass repo_id='user/repo' (and set HF_TOKEN if private)."
+    #     )
 
     # Load config/meta/embeddings
-    cfg  = json.load(open(CFG_PATH, "r", encoding="utf-8"))
+    # cfg  = json.load(open(CFG_PATH, "r", encoding="utf-8"))
     meta = pd.read_parquet(META_PATH)
-    embs = np.load(EMB_PATH, mmap_mode="r")  # float32, L2-normalized
+    # embs = np.load(EMB_PATH, mmap_mode="r")  # float32, L2-normalized
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    encoder = SentenceTransformer(cfg["model"], device=device)
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    # encoder = SentenceTransformer(cfg["model"], device=device)
 
-    index: Optional["hnswlib.Index"] = None
-    if (hnswlib is not None) and HNSW_PATH.exists():
-        index = hnswlib.Index(space="cosine", dim=int(cfg["dim"]))
-        index.load_index(str(HNSW_PATH), max_elements=int(cfg["n"]))
-        index.set_ef(int(cfg.get("efQuery", 200)))
+    # index: Optional["hnswlib.Index"] = None
+    # if (hnswlib is not None) and HNSW_PATH.exists():
+    #     index = hnswlib.Index(space="cosine", dim=int(cfg["dim"]))
+    #     index.load_index(str(HNSW_PATH), max_elements=int(cfg["n"]))
+    #     index.set_ef(int(cfg.get("efQuery", 200)))
 
-    return meta, embs, index, encoder
+    return meta#, embs, index, encoder
 
 
 def other_comments_same_author_same_topic(
