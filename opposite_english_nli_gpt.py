@@ -120,7 +120,7 @@ def nli_contradiction_proxy(
     premise: str,
     hypotheses: List[str],
     nli_model: SentenceTransformer,
-    batch_size: int = 48
+    batch_size: int = 64  #48# Increased from 48 for faster processing
 ) -> np.ndarray:
     """
     Fast proxy using a SBERT-style NLI checkpoint:
@@ -213,10 +213,10 @@ def run_opposite_pipeline_and_render(
     user_opinion: str,
     topic_keywords: str | list[str],
     meta,
-    embs, index, encoder,
+    #embs, index, encoder,
     # retrieval / ranking knobs
-    pool_size: int = 200,
-    k2_short: int = 15,#30,            # shortlist size for GPT (K2)
+    pool_size: int = 100,  # Reduced from 200 for faster processing
+    k2_short: int = 10,    # Reduced from 15 for faster GPT calls
     nli_model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli",
     use_gpt: bool = True,
     gpt_model: str = "gpt-5-mini",
@@ -230,7 +230,7 @@ def run_opposite_pipeline_and_render(
     nli_rerank_fn  = rerank_with_nli_only,         # e.g., rerank_with_nli
     gpt_rerank_fn  = gpt_rerank_contradiction,         # e.g., gpt_rerank_contradiction
     gpt_client     = client,         # AzureOpenAI or OpenAI client
-    include_author_threads: bool = True,              # NEW
+    include_author_threads: bool = False,#True,              # NEW
     other_comments_fn = other_comments_same_author_same_topic,  # NEW
     author_limit: int = 15,                            # NEW
     author_text_col: str = "comment_text",                 # NEW
