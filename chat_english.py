@@ -6,15 +6,19 @@ import random
 import time
 from dotenv import load_dotenv
 import streamlit as st
-from openai import AzureOpenAI, OpenAI
-from typing import List, Optional
+from openai import AzureOpenAI
+from pathlib import Path
+from typing import List, Tuple, Optional
+import numpy as np
+import pandas as pd
 from toxicity import measuring_toxicity
-from opposite_english_nli_gpt import run_opposite_pipeline_and_render, load_english
+from opposite_english_nli_gpt import run_opposite_pipeline_and_render#, load_english
 from firebase_store_english import save_into_firebase
+from huggingface_hub import snapshot_download
 
 load_dotenv()
-if not os.getenv("OPENAI_API_KEY"):
-    st.error("OPENAI_API_KEY is missing. Add it to a .env file or your environment.")
+if not os.getenv("AZURE_OPENAI_API_KEY"): #OPENAI_API_KEY
+    st.error("AZURE_OPENAI_API_KEY is missing. Add it to a .env file or your environment.")
     st.stop()
 endpoint = os.getenv("ENDPOINT_URL", "https://ai-asolomon28262ai165132345402.openai.azure.com/")
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
@@ -26,35 +30,115 @@ client = AzureOpenAI(
     api_version="2025-01-01-preview",
 )
 
+# @st.cache_resource(show_spinner=False)
+# def load_english_cached_blm():
+#     #returns meta, embs, index, encoder
+#     return load_english(
+#         "./english_blm",
+#         repo_id="Liran73/english-blm",#english-opposite-artifacts",
+#         repo_type="dataset",
+#         hf_token_env="HF_TOKEN",
+#     )
+
+# @st.cache_resource(show_spinner=False)
+# def load_english_cached_guns():
+#     #returns meta, embs, index, encoder
+#     return load_english(
+#         "./english_guns",
+#         repo_id="Liran73/english-guns",#english-opposite-artifacts",
+#         repo_type="dataset",
+#         hf_token_env="HF_TOKEN",
+#     )
+
+# @st.cache_resource(show_spinner=False)
+# def load_english_cached_samesex():
+#     #returns meta, embs, index, encoder
+#     return load_english(
+#         "./english_samesex",
+#         repo_id="Liran73/english-samesex",#english-opposite-artifacts",
+#         repo_type="dataset",
+#         hf_token_env="HF_TOKEN",
+#     )
+
+def _ensure_artifacts_from_hf(
+    local_dir: str | Path,
+    repo_id: Optional[str] = None,
+    repo_type: str = "dataset",
+    token_env: str = "HF_TOKEN",
+) -> None:
+    """
+    If repo_id is provided and required files are missing locally,
+    download a snapshot from Hugging Face Hub into local_dir.
+    """
+    if not repo_id:
+        return  # HF not requested
+
+    target = Path(local_dir)
+    need = [
+        target / "meta.parquet"
+    ]
+    if all(p.exists() for p in need[:]):  # all required exist; skip download
+        return
+
+    token = os.getenv(token_env, None)  # required if private repo
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        local_dir=str(local_dir),
+        local_dir_use_symlinks=False,
+        token=token,
+    )
+
+def load_english(
+    art_dir: str | Path = "./english",
+    *,
+    # pass these ONLY if you want automatic HF download when local files are missing
+    repo_id: Optional[str] = None,       # e.g., "yourname/hebrew-opposite-artifacts"
+    repo_type: str = "dataset",
+    hf_token_env: str = "HF_TOKEN",
+) -> Tuple[pd.DataFrame]:#, np.ndarray, Optional["hnswlib.Index"], SentenceTransformer]:
+    """
+    Load English artifacts: config.json, meta.parquet, embeddings.npy, optional hnsw_cosine.bin.
+    - If repo_id is provided and files are missing, pulls them from Hugging Face Hub first.
+    - Validates that meta contains a 'message' column (comment text).
+    Returns: (meta, embs, index, encoder)
+    """
+    ART_DIR = Path(art_dir)
+
+    # Try to bring files from HF if missing
+    _ensure_artifacts_from_hf(ART_DIR, repo_id=repo_id, repo_type=repo_type, token_env=hf_token_env)
+
+    META_PATH = ART_DIR / "meta.parquet"
+    meta = pd.read_parquet(META_PATH)
+
+    return meta
+
 @st.cache_resource(show_spinner=False)
-def load_english_cached_blm():
-    #returns meta, embs, index, encoder
+def load_topic_dataset(topic: str):
+    topic_map = {
+        "blm": ("./english_blm", "Liran73/english-blm"),
+        "guns": ("./english_guns", "Liran73/english-guns"),
+        "samesex": ("./english_samesex", "Liran73/english-samesex"),
+    }
+
+    local_dir, repo_id = topic_map[topic]
+
     return load_english(
-        "./english_blm",
-        repo_id="Liran73/english-blm",#english-opposite-artifacts",
+        local_dir,
+        repo_id=repo_id,
         repo_type="dataset",
         hf_token_env="HF_TOKEN",
     )
 
-@st.cache_resource(show_spinner=False)
-def load_english_cached_guns():
-    #returns meta, embs, index, encoder
-    return load_english(
-        "./english_guns",
-        repo_id="Liran73/english-guns",#english-opposite-artifacts",
-        repo_type="dataset",
-        hf_token_env="HF_TOKEN",
-    )
 
-@st.cache_resource(show_spinner=False)
-def load_english_cached_samesex():
-    #returns meta, embs, index, encoder
-    return load_english(
-        "./english_samesex",
-        repo_id="Liran73/english-samesex",#english-opposite-artifacts",
-        repo_type="dataset",
-        hf_token_env="HF_TOKEN",
-    )
+def release_topic_dataset(topic: str):
+    import gc
+    key = f"meta_{topic}"
+
+    if key in st.session_state:
+        st.session_state[key] = None
+
+    gc.collect()
 
 st.set_page_config(page_title="Thesis user experiment - English version", page_icon="💬", layout="centered")
 
@@ -97,7 +181,7 @@ SURVEY_finish = [
     {"id": "feedback",    "label": "Open feedback (what stood out, suggestions, etc.)", "type": "text"},
 ]
 
-MAX_TURNS = 7
+MAX_TURNS = 2
 
 system_prompt_chat1_blm = ""
 system_prompt_chat1_guns = ""
@@ -109,17 +193,17 @@ system_prompt_chat2_samesex = ""
 
 meta_blm, meta_guns, meta_samesex = None, None, None
 
-def ensure_artifacts_loaded():
-    if st.session_state.get("artifacts_loaded"):
-        return
+# def ensure_artifacts_loaded():
+#     if st.session_state.get("artifacts_loaded"):
+#         return
 
-    meta_blm = load_english_cached_blm()#, embs, index, encoder*/ = load_english_cached()
-    st.session_state["meta_blm"] = meta_blm
-    meta_guns = load_english_cached_guns()
-    st.session_state["meta_guns"] = meta_guns
-    meta_samesex = load_english_cached_samesex()
-    st.session_state["meta_samesex"] = meta_samesex
-    st.session_state["artifacts_loaded"] = True
+#     meta_blm = load_english_cached_blm()#, embs, index, encoder*/ = load_english_cached()
+#     st.session_state["meta_blm"] = meta_blm
+#     meta_guns = load_english_cached_guns()
+#     st.session_state["meta_guns"] = meta_guns
+#     meta_samesex = load_english_cached_samesex()
+#     st.session_state["meta_samesex"] = meta_samesex
+#     st.session_state["artifacts_loaded"] = True
 
 def init_state():
     ss = st.session_state
@@ -166,10 +250,10 @@ def init_state():
     # ss.setdefault("embs", None)
     # ss.setdefault("index", None)
     # ss.setdefault("encoder", None)
-    ss.setdefault("artifacts_loaded", False)
+    # ss.setdefault("artifacts_loaded", False)
 
-    if not ss["artifacts_loaded"]:
-        ensure_artifacts_loaded()
+    # if not ss["artifacts_loaded"]:
+    #     ensure_artifacts_loaded()
 
 init_state()
 
@@ -368,6 +452,8 @@ def build_chat_env_blm():
             topic_map = {
                     "blm": ["black lives matter"],
                     }
+            
+            meta_blm = load_topic_dataset("blm")
 
             triples = []  
             system_prompts_chat1 = {}
@@ -386,7 +472,7 @@ def build_chat_env_blm():
                 opposite_comments, timings = run_opposite_pipeline_and_render(
                     user_opinion=user_text,
                     topic_keywords=topic_map[key], 
-                    meta=st.session_state.meta_blm,
+                    meta=meta_blm,#st.session_state.meta_blm,
                     on_progress=on_progress)
                 
                 for i, item in enumerate(opposite_comments, 1):
@@ -407,6 +493,9 @@ def build_chat_env_blm():
             st.session_state.system_prompt_chat2_blm = system_prompts_chat2['blm']
             st.session_state.chat1_messages_blm = None
 
+            st.session_state["meta_blm"] = None
+            import gc; gc.collect()
+
             st.session_state.stage = "chat1_blm"
             on_progress(100, "Ready ✅")
             progress_text.empty()
@@ -422,6 +511,8 @@ def build_chat_env_guns():
             topic_map = {
                     "guns": ["gun", "gun control"],
                     }
+
+            meta_guns = load_topic_dataset("guns")
 
             triples = []  
             system_prompts_chat1 = {}
@@ -440,12 +531,12 @@ def build_chat_env_guns():
                 opposite_comments, timings = run_opposite_pipeline_and_render(
                     user_opinion=user_text,
                     topic_keywords=topic_map[key], 
-                    meta=st.session_state.meta_guns,
+                    meta=meta_guns,#st.session_state.meta_guns,
                     on_progress=on_progress)
                 
                 for i, item in enumerate(opposite_comments, 1):
                     row = item["row"]
-                    all_comments.append(row.get("message", ""))
+                    all_comments.append(row.get("comment_text", ""))
                     for j, t in enumerate(item.get("other_by_author", []), 1):
                         all_comments.append(t)
                 print("Timings (ms):", timings)
@@ -460,6 +551,9 @@ def build_chat_env_guns():
             st.session_state.system_prompt_chat1_guns = system_prompts_chat1['guns']
             st.session_state.system_prompt_chat2_guns = system_prompts_chat2['guns']
             st.session_state.chat1_messages_guns = None
+
+            st.session_state["meta_guns"] = None
+            import gc; gc.collect()
 
             st.session_state.stage = "chat1_guns"
             on_progress(100, "Ready ✅")
@@ -476,6 +570,8 @@ def build_chat_env_samesex():
             topic_map = {
                     "samesex": ["same-sex", "gay", "marriage", "lgbt", "lgbtq"],
                     }
+            
+            meta_samesex = load_topic_dataset("samesex")
 
             triples = []  
             system_prompts_chat1 = {}
@@ -494,12 +590,12 @@ def build_chat_env_samesex():
                 opposite_comments, timings = run_opposite_pipeline_and_render(
                     user_opinion=user_text,
                     topic_keywords=topic_map[key], 
-                    meta=st.session_state.meta_samesex,
+                    meta=meta_samesex,#st.session_state.meta_samesex,
                     on_progress=on_progress)
                 
                 for i, item in enumerate(opposite_comments, 1):
                     row = item["row"]
-                    all_comments.append(row.get("message", ""))
+                    all_comments.append(row.get("comment_text", ""))
                     for j, t in enumerate(item.get("other_by_author", []), 1):
                         all_comments.append(t)
                 print("Timings (ms):", timings)
@@ -514,6 +610,9 @@ def build_chat_env_samesex():
             st.session_state.system_prompt_chat1_samesex = system_prompts_chat1['samesex']
             st.session_state.system_prompt_chat2_samesex = system_prompts_chat2['samesex']
             st.session_state.chat1_messages_samesex = None
+
+            st.session_state["meta_samesex"] = None
+            import gc; gc.collect()
 
             st.session_state.stage = "chat1_samesex"
             on_progress(100, "Ready ✅")
