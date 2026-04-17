@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 import os, json, re, time
-from typing import List, Dict
+from typing import Iterable, List, Dict, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -15,14 +15,15 @@ import streamlit as st
 
 # Torch / NLI
 import torch
-from sentence_transformers import SentenceTransformer
+#from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from pathlib import Path
 
 # Azure OpenAI (official openai package >= 1.0)
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
-from opposite_english_nli import load_english, other_comments_same_author_same_topic  
+#from opposite_english_nli import load_english, other_comments_same_author_same_topic  
 
 
 # ===============================
@@ -109,48 +110,127 @@ def gpt_rerank_contradiction(
 # ===============================
 # NLI (multilingual) – fast proxy
 # ===============================
+# @st.cache_resource(show_spinner=False)
+# def load_nli(model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"):
+#     device = "cuda" if torch.cuda.is_available() else "cpu"
+#     mdl = SentenceTransformer(model_name, device=device)
+#     return mdl
+
+# @torch.inference_mode()
+# def nli_contradiction_proxy(
+#     premise: str,
+#     hypotheses: List[str],
+#     nli_model: SentenceTransformer,
+#     batch_size: int = 64  #48# Increased from 48 for faster processing
+# ) -> np.ndarray:
+#     """
+#     Fast proxy using a SBERT-style NLI checkpoint:
+#     encode [premise, hypothesis] pairs and map to a 0..1 'contradiction-ish' score.
+#     (If you have a proper XNLI cross-encoder with logits, swap this for true P(contradiction).)
+#     """
+#     pairs = [[premise, h] for h in hypotheses]
+#     embs = nli_model.encode(
+#         pairs, convert_to_tensor=True, batch_size=batch_size, show_progress_bar=False
+#     )
+#     if embs.dim() == 2:
+#         # crude mapping to [0..1]
+#         scores = torch.tanh(-embs.norm(dim=1))
+#         probs = (scores - scores.min()) / (scores.max() - scores.min() + 1e-8)
+#     else:
+#         probs = torch.full((len(hypotheses),), 0.5)
+
+#     return probs.detach().cpu().numpy().astype("float32")
+
+# def rerank_with_nli_only(
+#     user_text: str,
+#     pool_rows: List[Dict],
+#     *,
+#     nli_model: SentenceTransformer
+# ) -> List[Dict]:
+#     if not pool_rows:
+#         return []
+
+#     hyps = [str(r.get("comment_text", "")) for r in pool_rows]
+#     nli_p = nli_contradiction_proxy(user_text, hyps, nli_model=nli_model, batch_size=48)
+
+#     order = np.argsort(-nli_p)  # descending
+
+#     ranked = []
+#     for i in order.tolist():
+#         r = dict(pool_rows[i])
+#         r["nli_contradiction"] = float(nli_p[i])
+#         r["combined_score"] = float(nli_p[i])  # final blend happens after GPT
+#         ranked.append(r)
+#     return ranked
+
 @st.cache_resource(show_spinner=False)
 def load_nli(model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    mdl = SentenceTransformer(model_name, device=device)
-    return mdl
+    tok = AutoTokenizer.from_pretrained(model_name)
+    mdl = AutoModelForSequenceClassification.from_pretrained(model_name).eval()
+    return tok, mdl
 
 @torch.inference_mode()
-def nli_contradiction_proxy(
-    premise: str,
+def nli_contradiction_probs_batch(
+    tok,
+    mdl,
+    premises: List[str],
     hypotheses: List[str],
-    nli_model: SentenceTransformer,
-    batch_size: int = 64  #48# Increased from 48 for faster processing
+    batch_size: int = 16,
 ) -> np.ndarray:
     """
-    Fast proxy using a SBERT-style NLI checkpoint:
-    encode [premise, hypothesis] pairs and map to a 0..1 'contradiction-ish' score.
-    (If you have a proper XNLI cross-encoder with logits, swap this for true P(contradiction).)
+    Batched P(contradiction) for (premise, hypothesis) pairs.
+    Returns np.array of shape [len(premises)], values in [0,1].
     """
-    pairs = [[premise, h] for h in hypotheses]
-    embs = nli_model.encode(
-        pairs, convert_to_tensor=True, batch_size=batch_size, show_progress_bar=False
-    )
-    if embs.dim() == 2:
-        # crude mapping to [0..1]
-        scores = torch.tanh(-embs.norm(dim=1))
-        probs = (scores - scores.min()) / (scores.max() - scores.min() + 1e-8)
-    else:
-        probs = torch.full((len(hypotheses),), 0.5)
+    assert len(premises) == len(hypotheses)
 
-    return probs.detach().cpu().numpy().astype("float32")
+    all_probs = []
+
+    id2label = getattr(mdl.config, "id2label", None)
+    if id2label and isinstance(id2label, dict):
+        labels = [id2label[i].lower() for i in range(len(id2label))]
+        c_idx = labels.index("contradiction") if "contradiction" in labels else 2
+    else:
+        c_idx = 2
+
+    for s in range(0, len(premises), batch_size):
+        p = premises[s:s + batch_size]
+        h = hypotheses[s:s + batch_size]
+
+        batch = tok(
+            p,
+            h,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+        )
+
+        logits = mdl(**batch).logits
+        probs = torch.softmax(logits, dim=-1)[:, c_idx].cpu().numpy()
+        all_probs.append(probs)
+
+    return np.concatenate(all_probs, axis=0) if all_probs else np.array([], dtype=np.float32)
 
 def rerank_with_nli_only(
     user_text: str,
     pool_rows: List[Dict],
     *,
-    nli_model: SentenceTransformer
+    nli_model,
 ) -> List[Dict]:
     if not pool_rows:
         return []
 
-    hyps = [str(r.get("comment_text", "")) for r in pool_rows]
-    nli_p = nli_contradiction_proxy(user_text, hyps, nli_model=nli_model, batch_size=48)
+    tok, mdl = nli_model
+
+    hypotheses = [str(r.get("comment_text", "")) for r in pool_rows]
+    premises = [user_text] * len(pool_rows)
+
+    nli_p = nli_contradiction_probs_batch(
+        tok,
+        mdl,
+        premises,
+        hypotheses,
+        batch_size=16,
+    )
 
     order = np.argsort(-nli_p)  # descending
 
@@ -160,7 +240,9 @@ def rerank_with_nli_only(
         r["nli_contradiction"] = float(nli_p[i])
         r["combined_score"] = float(nli_p[i])  # final blend happens after GPT
         ranked.append(r)
+
     return ranked
+
 
 def build_pool_topic_only(
     *,
@@ -203,9 +285,91 @@ def build_pool_topic_only(
     return pool
 
 
-def _load_artifacts(path: str):
-    meta, embs, index, encoder = load_english(path)  # expects config-trained encoder, l2-normalized embs
-    return meta, embs, index, encoder
+# def _load_artifacts(path: str):
+#     meta, embs, index, encoder = load_english(path)  # expects config-trained encoder, l2-normalized embs
+#     return meta, embs, index, encoder
+
+def make_topic_mask_english(
+    meta: pd.DataFrame,
+    topic_query: str | Iterable[str],
+    require_all: bool = True
+) -> np.ndarray:
+    """
+    Build a boolean mask over meta['message'] (Hebrew dataset) for rows containing the keywords.
+    - topic_query: string with words OR an iterable of keywords.
+    - require_all: True => all keywords must appear (AND), False => any keyword (OR).
+    """
+    titles = meta["comment_text"].astype(str)
+
+    if isinstance(topic_query, str):
+        kws = [t for t in re.split(r"[\W_]+", topic_query) if t]
+    else:
+        kws = [str(t) for t in topic_query if str(t).strip()]
+
+    if not kws:
+        return np.ones(len(meta), dtype=bool)
+
+    if require_all:
+        mask = np.ones(len(meta), dtype=bool)
+        for kw in kws:
+            mask &= titles.str.contains(re.escape(kw), case=False, na=False).values
+    else:
+        mask = np.zeros(len(meta), dtype=bool)
+        for kw in kws:
+            mask |= titles.str.contains(re.escape(kw), case=False, na=False).values
+    return mask
+
+def other_comments_same_author_same_topic(
+    meta: pd.DataFrame,
+    topic_query: str | Iterable[str],
+    *,
+    base_row: dict,                 # from your opposite finder; must contain 'commenter_id' (and optionally 'row_index')
+    require_all_keywords: bool = False,
+    text_col: str = "comment_text",
+    id_col: str = "commenter_id",
+    limit: Optional[int] = None,
+) -> List[str]:
+    """
+    Return ONLY the message strings of other comments by the same commenter_id
+    that also match the same topic keywords.
+    - Skips if commenter_id == '-1' or empty.
+    - Excludes the base row (by row_index if present; else by exact text match).
+    - If 'date' exists in meta, sorts by date desc (newest first).
+    """
+    if id_col not in meta.columns:
+        raise ValueError(f"meta missing '{id_col}'")
+    if text_col not in meta.columns:
+        raise ValueError(f"meta missing '{text_col}'")
+    
+    cid = str(base_row.get(id_col, "")).strip()
+    print(cid)
+    if cid in ("", "-1"):
+        return []
+    
+    author_mask = meta[id_col].astype(str).str.strip().eq(cid).values
+    topic_mask  = make_topic_mask_english(meta, topic_query, require_all=require_all_keywords)
+
+    mask = author_mask & topic_mask
+
+    # exclude the base row
+    base_idx = base_row.get("row_index", None)
+    if isinstance(base_idx, (int, np.integer)) and 0 <= int(base_idx) < len(meta):
+        mask[int(base_idx)] = False
+    else:
+        base_text = str(base_row.get(text_col, ""))
+        if base_text:
+            mask &= ~(meta[text_col].astype(str) == base_text).values
+
+    idxs = np.flatnonzero(mask)
+    if idxs.size == 0:
+        return []
+
+    if limit is not None:
+        idxs = idxs[:int(limit)]
+
+    # return only message strings
+    return meta.iloc[idxs][text_col].astype(str).tolist()
+
 
 
 def run_opposite_pipeline_and_render(
