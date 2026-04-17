@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 # --- App / UI ---
 streamlit==1.54.0
 
@@ -10,14 +11,11 @@ python-dotenv==1.2.1
 # --- Data / artifacts ---
 numpy==2.4.2
 pandas==2.2.3
-pyarrow==23.0.1
 
 # --- Retrieval / embedding / NLI ---
-torch==2.10.0
-transformers==5.2.0
-sentence-transformers==5.2.3
-huggingface-hub==1.4.1
-hnswlib==0.8.0
+torch==2.2.2+cpu
+transformers==4.46.3
+huggingface-hub==0.26.5
 
 # --- Firebase ---
 firebase-admin==7.1.0
