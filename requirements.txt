@@ -1,21 +1,21 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 # --- App / UI ---
-streamlit==1.54.0
+streamlit==1.49.1
 
 # --- OpenAI / Azure OpenAI ---
-openai==2.21.0
+openai==1.106.1
 
 # --- Env vars ---
-python-dotenv==1.2.1
+python-dotenv==1.0.0
 
 # --- Data / artifacts ---
-numpy==2.4.2
-pandas==2.2.3
+numpy==1.26.4
+pandas==2.0.1
 
 # --- Retrieval / embedding / NLI ---
-torch==2.2.2+cpu
-transformers==4.46.3
-huggingface-hub==0.26.5
+torch==2.4.1+cpu
+transformers==4.56.1
+huggingface-hub==0.36.0
 
 # --- Firebase ---
 firebase-admin==7.1.0
