@@ -49,6 +49,17 @@ client = AzureOpenAI(
     api_version="2025-01-01-preview",
 )
 
+import requests
+
+def debug_azure_connectivity():
+    print("Azure endpoint value:", repr(endpoint))
+
+    try:
+        r = requests.get(endpoint, timeout=10)
+        print("Azure endpoint reachability OK. status_code=", r.status_code)
+    except Exception as e:
+        print("Azure endpoint reachability FAILED:", repr(e))
+
 # ===============================
 # GPT re-ranker (Azure OpenAI)
 # ===============================
@@ -72,6 +83,9 @@ def gpt_rerank_contradiction(
     """
     Returns the same list with 'gpt_contra' and 'gpt_rationale' added, sorted by gpt_contra desc.
     """
+
+    debug_azure_connectivity()
+    
     out_scores: Dict[str, tuple[float, str]] = {}
 
     for s in range(0, len(candidates), batch_size):
