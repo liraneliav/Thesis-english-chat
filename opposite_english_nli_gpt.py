@@ -33,12 +33,12 @@ load_dotenv()
 if not os.getenv("ENDPOINT_URL"):
     st.error("ENDPOINT_URL is missing. Add it to a .env file or your environment.")
     st.stop()
-else
+else:
     print("'ENDPOINT_URL' found")
 if not os.getenv("AZURE_OPENAI_API_KEY"):
     st.error("AZURE_OPENAI_API_KEY is missing. Add it to a .env file or your environment.")
     st.stop()
-else
+else:
     print("'AZURE_OPENAI_API_KEY' found")
 endpoint = os.getenv("ENDPOINT_URL")
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
