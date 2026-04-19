@@ -381,7 +381,7 @@ def run_opposite_pipeline_and_render(
     #embs, index, encoder,
     # retrieval / ranking knobs
     pool_size: int = 100,  # Reduced from 200 for faster processing
-    k2_short: int = 10,    # Reduced from 15 for faster GPT calls
+    k2_short: int = 5,    # Reduced from 15 for faster GPT calls
     nli_model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli",
     use_gpt: bool = True,
     gpt_model: str = "gpt-5-mini",
@@ -475,7 +475,7 @@ def run_opposite_pipeline_and_render(
             txt = str(r.get("comment_text", ""))
             candidates.append({"id": rid, "text": txt, "topic": "", "row": r})
 
-        gpt_ranked = gpt_rerank_fn(user_opinion, candidates, model=gpt_model, batch_size=40)
+        gpt_ranked = gpt_rerank_fn(user_opinion, candidates, model=gpt_model, batch_size=8)
 
         # Final blend: β * NLI + γ * GPT
         out = []
