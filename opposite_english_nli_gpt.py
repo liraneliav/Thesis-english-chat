@@ -30,7 +30,13 @@ from dotenv import load_dotenv
 # Azure OpenAI client
 # ===============================
 load_dotenv()
-endpoint = os.getenv("ENDPOINT_URL", "https://YOUR-ENDPOINT.openai.azure.com/")
+if not os.getenv("ENDPOINT_URL"):
+    st.error("ENDPOINT_URL is missing. Add it to a .env file or your environment.")
+    st.stop()
+if not os.getenv("AZURE_OPENAI_API_KEY"):
+    st.error("AZURE_OPENAI_API_KEY is missing. Add it to a .env file or your environment.")
+    st.stop()
+endpoint = os.getenv("ENDPOINT_URL")
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 
 client = AzureOpenAI(
