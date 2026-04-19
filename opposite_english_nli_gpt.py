@@ -205,7 +205,8 @@ def nli_contradiction_probs_batch(
         )
 
         logits = mdl(**batch).logits
-        probs = torch.softmax(logits, dim=-1)[:, c_idx].cpu().numpy()
+        probs_tensor = torch.softmax(logits, dim=-1)[:, c_idx].detach().cpu()
+        probs = np.asarray(probs_tensor.tolist(), dtype=np.float32)
         all_probs.append(probs)
 
     return np.concatenate(all_probs, axis=0) if all_probs else np.array([], dtype=np.float32)
