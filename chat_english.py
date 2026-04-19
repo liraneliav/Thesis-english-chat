@@ -17,8 +17,8 @@ from firebase_store_english import save_into_firebase
 from huggingface_hub import snapshot_download
 
 load_dotenv()
-if not os.getenv("AZURE_OPENAI_API_KEY"): #OPENAI_API_KEY
-    st.error("AZURE_OPENAI_API_KEY is missing. Add it to a .env file or your environment.")
+if not os.getenv("OPENAI_API_KEY"): #OPENAI_API_KEY
+    st.error("OPENAI_API_KEY is missing. Add it to a .env file or your environment.")
     st.stop()
 endpoint = os.getenv("ENDPOINT_URL", "https://ai-asolomon28262ai165132345402.openai.azure.com/")
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
