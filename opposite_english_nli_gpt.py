@@ -84,7 +84,7 @@ def gpt_rerank_contradiction(
     Returns the same list with 'gpt_contra' and 'gpt_rationale' added, sorted by gpt_contra desc.
     """
 
-    debug_azure_connectivity()
+    #debug_azure_connectivity()
     
     out_scores: Dict[str, tuple[float, str]] = {}
 
@@ -499,7 +499,7 @@ def run_opposite_pipeline_and_render(
             txt = str(r.get("comment_text", ""))
             candidates.append({"id": rid, "text": txt, "topic": "", "row": r})
 
-        gpt_ranked = gpt_rerank_fn(user_opinion, candidates, model=gpt_model, batch_size=8)
+        gpt_ranked = gpt_rerank_fn(user_opinion, candidates, model=gpt_model, batch_size=4)#8)
 
         # Final blend: β * NLI + γ * GPT
         out = []
