@@ -404,8 +404,8 @@ def run_opposite_pipeline_and_render(
     meta,
     #embs, index, encoder,
     # retrieval / ranking knobs
-    pool_size: int = 100,  # Reduced from 200 for faster processing
-    k2_short: int = 5,    # Reduced from 15 for faster GPT calls
+    pool_size: int = 200,  # Reduced from 100 for faster processing
+    k2_short: int = 15,    # Reduced from 5 for faster GPT calls
     nli_model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli",
     use_gpt: bool = True,
     gpt_model: str = "gpt-5-mini",
