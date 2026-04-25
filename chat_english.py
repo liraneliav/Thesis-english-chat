@@ -241,6 +241,11 @@ def init_state():
     ss.setdefault("survey_2", {})
     ss.setdefault("survey_finish", {})
 
+    # survey submission tracking (locks Done button after valid submission)
+    ss.setdefault("survey_1_submitted", False)
+    ss.setdefault("survey_2_submitted", False)
+    ss.setdefault("survey_finish_submitted", False)
+
     ss.setdefault("chat_number_start", random.randint(1, 2))
     print(f"first chat number = {st.session_state.chat_number_start}")
 
@@ -257,6 +262,417 @@ def init_state():
 
 init_state()
 
+# ── Design system constants ────────────────────────────────────────────────
+TOPIC_COLORS  = {"blm": "#6C63FF", "guns": "#00B4D8", "samesex": "#10B981"}
+TOPIC_LABELS  = {"blm": "Black Lives Matter", "guns": "Gun Control", "samesex": "Same-Sex Marriage"}
+
+STAGE_LABELS = {
+    "instructions":                     (0,  "Introduction"),
+    "onboarding_profile":               (1,  "Your Profile"),
+    "onboarding_opinions":              (2,  "Your Opinions"),
+    "wait_creating_system_prompts_blm": (3,  "Setting Up"),
+    "chat1_blm":                        (3,  "Chat 1 · Black Lives Matter"),
+    "wait_creating_system_prompts_guns":(4,  "Setting Up"),
+    "chat1_guns":                       (4,  "Chat 1 · Gun Control"),
+    "wait_creating_system_prompts_samesex": (5, "Setting Up"),
+    "chat1_samesex":                    (5,  "Chat 1 · Same-Sex Marriage"),
+    "survey1":                          (6,  "Mid-Point Survey"),
+    "wait_chat2_blm":                   (7,  "Setting Up"),
+    "chat2_blm":                        (7,  "Chat 2 · Black Lives Matter"),
+    "wait_chat2_guns":                  (8,  "Setting Up"),
+    "chat2_guns":                       (8,  "Chat 2 · Gun Control"),
+    "wait_chat2_samesex":               (9,  "Setting Up"),
+    "chat2_samesex":                    (9,  "Chat 2 · Same-Sex Marriage"),
+    "survey2":                          (10, "Mid-Point Survey"),
+    "full_survey":                      (11, "Final Survey"),
+    "due_disclosure":                   (12, "Disclosure"),
+    "thanks":                           (13, "Complete"),
+    "not_save":                         (13, "Complete"),
+}
+TOTAL_STEPS = 13
+
+
+def inject_global_css():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body, .stApp {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+        background-color: #F2F3FA !important;
+    }
+
+    /* ── Hide Streamlit chrome ── */
+    #MainMenu, footer, header { visibility: hidden !important; }
+
+    /* ── Main content column ── */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 760px !important;
+    }
+
+    /* ── Typography ── */
+    h1 { font-size: 2rem !important; font-weight: 700 !important; color: #1A1A2E !important; letter-spacing: -0.5px !important; line-height: 1.2 !important; }
+    h2 { font-size: 1.4rem !important; font-weight: 700 !important; color: #1A1A2E !important; }
+    h3, h4 { font-weight: 600 !important; color: #1A1A2E !important; }
+    p, li, label { line-height: 1.65 !important; }
+
+    /* ── Cards ── */
+    .ui-card {
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 2rem 2.25rem;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.04), 0 8px 24px rgba(108,99,255,0.08);
+        margin-bottom: 1.5rem;
+        border: 1px solid rgba(108,99,255,0.07);
+    }
+
+    /* ── Hero banners ── */
+    .ui-hero {
+        background: linear-gradient(135deg, #5B52F0 0%, #7C73FF 60%, #9B8FFF 100%);
+        border-radius: 20px;
+        padding: 2.25rem 2.5rem;
+        color: #fff;
+        margin-bottom: 1.5rem;
+        position: relative;
+        overflow: hidden;
+    }
+    .ui-hero::before {
+        content: '';
+        position: absolute; top: -50px; right: -50px;
+        width: 180px; height: 180px;
+        background: rgba(255,255,255,0.07);
+        border-radius: 50%;
+        pointer-events: none;
+    }
+    .ui-hero::after {
+        content: '';
+        position: absolute; bottom: -70px; left: -30px;
+        width: 220px; height: 220px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 50%;
+        pointer-events: none;
+    }
+    .ui-hero h1 { color: #fff !important; margin: 0 0 0.4rem 0 !important; font-size: 1.9rem !important; position: relative; z-index: 1; }
+    .ui-hero p  { margin: 0 !important; opacity: 0.9; font-size: 1rem; position: relative; z-index: 1; }
+
+    /* ── Topic pill ── */
+    .ui-pill {
+        display: inline-block;
+        border-radius: 99px;
+        padding: 5px 16px;
+        font-weight: 700;
+        font-size: 0.78rem;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        margin-bottom: 0.75rem;
+        color: #fff;
+    }
+
+    /* ── Step badge ── */
+    .ui-step {
+        display: inline-block;
+        background: #EDEEFF;
+        color: #5B52F0;
+        border-radius: 99px;
+        padding: 4px 14px;
+        font-weight: 700;
+        font-size: 0.78rem;
+        letter-spacing: 0.3px;
+        margin-bottom: 1rem;
+        border: 1px solid rgba(91,82,240,0.15);
+    }
+
+    /* ── Progress strip ── */
+    .progress-track {
+        background: #E5E7EB;
+        border-radius: 99px;
+        height: 6px;
+        overflow: hidden;
+        margin-bottom: 0.4rem;
+    }
+    .stage-progress-bar {
+        height: 6px;
+        border-radius: 99px;
+        background: linear-gradient(90deg, #5B52F0, #00C4E8);
+        transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    /* ── Buttons ── */
+    .stButton > button[kind="primary"],
+    [data-testid="stFormSubmitButton"] > button {
+        background: linear-gradient(135deg, #5B52F0 0%, #7C73FF 100%) !important;
+        color: #fff !important;
+        border: none !important;
+        border-radius: 12px !important;
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        padding: 0.72rem 1.8rem !important;
+        letter-spacing: 0.2px !important;
+        box-shadow: 0 4px 16px rgba(91,82,240,0.32) !important;
+        transition: box-shadow 0.2s ease, transform 0.15s ease !important;
+        cursor: pointer !important;
+    }
+    .stButton > button[kind="primary"]:hover,
+    [data-testid="stFormSubmitButton"] > button:hover {
+        box-shadow: 0 6px 24px rgba(91,82,240,0.42) !important;
+        transform: translateY(-1px) !important;
+    }
+    .stButton > button[kind="primary"]:active { transform: translateY(0) !important; }
+
+    .stButton > button:not([kind="primary"]) {
+        border-radius: 12px !important;
+        border: 2px solid #5B52F0 !important;
+        color: #5B52F0 !important;
+        font-weight: 600 !important;
+        background: transparent !important;
+        transition: background 0.15s ease !important;
+    }
+    .stButton > button:not([kind="primary"]):hover { background: #EDEEFF !important; }
+
+    /* ── Inputs ── */
+    .stTextInput > div > div > input,
+    .stTextArea > div > div > textarea {
+        border-radius: 12px !important;
+        border: 1.5px solid #DDE0EB !important;
+        padding: 0.65rem 1rem !important;
+        font-family: 'Inter', sans-serif !important;
+        font-size: 0.95rem !important;
+        background: #FAFBFF !important;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+    }
+    .stTextInput > div > div > input:focus,
+    .stTextArea > div > div > textarea:focus {
+        border-color: #5B52F0 !important;
+        background: #fff !important;
+        box-shadow: 0 0 0 3px rgba(91,82,240,0.12) !important;
+        outline: none !important;
+    }
+
+    /* ── Selectbox ── */
+    .stSelectbox > div > div {
+        border-radius: 12px !important;
+        border: 1.5px solid #DDE0EB !important;
+        background: #FAFBFF !important;
+    }
+
+    /* ── Chat message bubbles ── */
+    [data-testid="stChatMessage"] {
+        display: flex !important;
+        align-items: flex-start !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+        margin-bottom: 1.1rem !important;
+        gap: 0.75rem !important;
+    }
+
+    /* user bubble — indigo gradient, right side
+       Uses structural selector so it works regardless of which testid
+       Streamlit assigns to the content wrapper in any version. */
+    [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:not([data-testid^="chatAvatarIcon"]) {
+        background: linear-gradient(135deg, #5B52F0 0%, #7C73FF 100%) !important;
+        color: #ffffff !important;
+        border-radius: 20px 20px 4px 20px !important;
+        padding: 0.85rem 1.15rem !important;
+        max-width: 84% !important;
+        flex-grow: 0 !important;
+        flex-shrink: 1 !important;
+        margin-left: auto !important;
+        margin-right: 0 !important;
+        box-shadow: 0 3px 14px rgba(91,82,240,0.28) !important;
+        border: none !important;
+    }
+    [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:not([data-testid^="chatAvatarIcon"]) p,
+    [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:not([data-testid^="chatAvatarIcon"]) * {
+        color: #ffffff !important;
+        margin-bottom: 0 !important;
+    }
+
+    /* assistant bubble — white card, left side */
+    [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div:not([data-testid^="chatAvatarIcon"]) {
+        background: #ffffff !important;
+        color: #1A1A2E !important;
+        border-radius: 20px 20px 20px 4px !important;
+        padding: 0.85rem 1.15rem !important;
+        max-width: 84% !important;
+        flex-grow: 0 !important;
+        flex-shrink: 1 !important;
+        border: 1px solid #E8EAFF !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05) !important;
+    }
+
+    /* ── Chat input ── */
+    [data-testid="stChatInput"] > div {
+        border-radius: 16px !important;
+        border: 2px solid #DDE0EB !important;
+        background: #fff !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.05) !important;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+    }
+    [data-testid="stChatInput"] > div:focus-within {
+        border-color: #5B52F0 !important;
+        box-shadow: 0 0 0 3px rgba(91,82,240,0.10) !important;
+    }
+
+    /* ── Turn progress bar ── */
+    div[data-testid="stProgressBar"] {
+        height: 8px !important;
+    }
+    div[data-testid="stProgressBar"] > div {
+        background: #E5E7EB !important;
+        border-radius: 99px !important;
+        height: 8px !important;
+    }
+    div[data-testid="stProgressBar"] > div > div {
+        background: linear-gradient(90deg, #5B52F0, #00C4E8) !important;
+        border-radius: 99px !important;
+        transition: width 0.4s ease !important;
+    }
+
+    /* ── Survey question number badge ── */
+    .q-block {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+        margin-bottom: 0.2rem;
+    }
+    .q-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 30px; height: 30px;
+        background: linear-gradient(135deg, #5B52F0, #7C73FF);
+        color: #fff;
+        border-radius: 50%;
+        font-weight: 700;
+        font-size: 0.78rem;
+        flex-shrink: 0;
+        margin-top: 1px;
+        box-shadow: 0 2px 8px rgba(91,82,240,0.25);
+    }
+    .q-text {
+        font-weight: 600;
+        color: #1A1A2E;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        padding-top: 2px;
+    }
+
+    /* ── Chat info panel ── */
+    .chat-header {
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 1rem 1.5rem;
+        margin-bottom: 1.25rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border: 1px solid #E8EAFF;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+    }
+    .chat-header-left { display: flex; align-items: center; gap: 0.75rem; }
+    .chat-header-topic { font-weight: 700; color: #1A1A2E; font-size: 1rem; }
+    .chat-header-sub { font-size: 0.82rem; color: #6B7280; margin-top: 1px; }
+    .chat-turn-badge {
+        background: #EDEEFF;
+        color: #5B52F0;
+        font-weight: 700;
+        font-size: 0.82rem;
+        padding: 4px 12px;
+        border-radius: 99px;
+        white-space: nowrap;
+    }
+
+    /* ── Alerts ── */
+    [data-testid="stAlert"] {
+        border-radius: 14px !important;
+        border: none !important;
+    }
+
+    /* ── Divider ── */
+    hr { border-color: #E5E7EB !important; margin: 1.5rem 0 !important; }
+
+    /* ── Feature 1: flip user row so avatar sits on the right ── */
+    [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+        flex-direction: row-reverse !important;
+    }
+
+    /* Sender labels */
+    [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:not([data-testid^="chatAvatarIcon"])::before {
+        content: 'You';
+        display: block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: rgba(255,255,255,0.8);
+        margin-bottom: 4px;
+        letter-spacing: 0.3px;
+    }
+    [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div:not([data-testid^="chatAvatarIcon"])::before {
+        content: 'Assistant';
+        display: block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #5B52F0;
+        margin-bottom: 4px;
+        letter-spacing: 0.3px;
+    }
+
+    /* ── Feature 2: typing indicator ── */
+    .typing-bubble {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #ffffff;
+        border-radius: 20px 20px 20px 4px;
+        padding: 0.85rem 1.15rem;
+        max-width: 84%;
+        border: 1px solid #E8EAFF;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        margin: 0 0 1.1rem 0;
+    }
+    .typing-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #9CA3AF;
+        animation: typingPulse 1.2s infinite ease-in-out;
+    }
+    .typing-dot:nth-child(1) { animation-delay: 0s; }
+    .typing-dot:nth-child(2) { animation-delay: 0.20s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.40s; }
+    @keyframes typingPulse {
+        0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+        40%            { transform: translateY(-5px); opacity: 1; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def render_stage_progress():
+    stage = st.session_state.get("stage", "instructions")
+    step, label = STAGE_LABELS.get(stage, (0, ""))
+    pct = int(step / TOTAL_STEPS * 100)
+    st.markdown(
+        f'<div class="progress-track">'
+        f'<div class="stage-progress-bar" style="width:{pct}%"></div>'
+        f'</div>'
+        f'<p style="font-size:0.78rem;color:#9CA3AF;margin:0 0 1.25rem 0;font-weight:500;letter-spacing:0.2px">'
+        f'STEP {step} OF {TOTAL_STEPS} &nbsp;·&nbsp; {label.upper()}'
+        f'</p>',
+        unsafe_allow_html=True
+    )
+
+
+inject_global_css()
+
+
 def user_turns(messages):
     if not messages:
         return 0
@@ -268,48 +684,93 @@ def onboarding_complete():
     return bool(p) and all((p.get(q["id"]) or "").strip() for q in QUESTIONS)
 
 def render_instructions():
-    st.markdown("### User Experiment Instructions 📜")
+    render_stage_progress()
+
+    st.markdown("""
+    <div class="ui-hero">
+      <h1>💬 Conversation Research Study</h1>
+      <p>University of Haifa &nbsp;·&nbsp; Thesis Research &nbsp;·&nbsp; English Version</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    #st.markdown('<div class="ui-card">', unsafe_allow_html=True)
+    st.markdown("#### Dear Participant,")
     st.markdown(
-        """
-Dear Participant,
-
-Below is a brief overview of the research study being conducted with your assistance. 
-
-You are invited to participate in a user experiment that will be conducted in English.
-
-First, you will be asked to provide non-identifying demographic information for statistical analysis purposes only. Following this, you will be asked to share your opinions on three different topics.
-
-After completing your profile, you will participate in a series of conversations with a conversation partner (interlocutor). For each of the three topics, you will engage in two separate conversations, totaling six conversations in all. 
-Please Note: As part of the natural flow of discussion, your conversation partner may present various arguments, opinions, or data. This information is intended for the purpose of discussion only and has not been verified for factual accuracy by the research team.
-
-You will be asked to complete a short survey after every three conversations, and a comprehensive summary survey upon completion of all six sessions.
-
-This experiment is part of a scientific research project. **Your participation is entirely voluntary and is conducted of your own free will**.
-By completing this experiment, you grant us permission to discuss or publish the results in academic forums. In any future publication, the information will be presented in a way that ensures you cannot be personally identified. Access to the original raw dataset will be restricted solely to the members of the research team.
-Before any data is shared outside the research team, all potentially identifying information will be removed. 
-Once de-identified, **the data may be used by the research team or shared with other researchers** for related or future research purposes. Furthermore, the anonymous data may be made available in online databases, allowing other researchers and interested parties to use the data for future analysis.
-
-By clicking the button at the bottom of this page, you certify that you are at least 18 years of age and agree to participate in this experiment of your own free will.
-
-We encourage you to speak freely. 
-
-Thank you very much for your contribution to the thesis research of Liran Eliav, conducted under the supervision of Dr. Adir Solomon, researchers from the University of Haifa.
-
-
-* Please write in English only.
-
-* Please note: You are free to withdraw your participation at any time without any consequences.
-
-* To contact us, please email: leliav02@campus.haifa.ac.il
-"""
+        "Below is a brief overview of the research study being conducted with your assistance. "
+        "You are invited to participate in a user experiment that will be conducted in English. "
     )
+    st.markdown("""
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin:1rem 0">
+      <div style="background:#F5F6FF;border-radius:12px;padding:1rem;border:1px solid #E8EAFF">
+        <div style="font-size:1.4rem;margin-bottom:0.3rem">👤</div>
+        <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Brief profile</div>
+        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will be asked to provide non-identifying demographic information for statistical analysis purposes only.</div>
+      </div>
+      <div style="background:#F5F6FF;border-radius:12px;padding:1rem;border:1px solid #E8EAFF">
+        <div style="font-size:1.4rem;margin-bottom:0.3rem">🗣️</div>
+        <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Share your views</div>
+        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will be asked to share your opinions on three different topics.</div>
+      </div>
+      <div style="background:#F5F6FF;border-radius:12px;padding:1rem;border:1px solid #E8EAFF">
+        <div style="font-size:1.4rem;margin-bottom:0.3rem">💬</div>
+        <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Six conversations</div>
+        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will participate in a series of conversations with a conversation partner (interlocutor). For each of the three topics, you will engage in two separate conversations.</div>
+      </div>
+      <div style="background:#F5F6FF;border-radius:12px;padding:1rem;border:1px solid #E8EAFF">
+        <div style="font-size:1.4rem;margin-bottom:0.3rem">📝</div>
+        <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Short surveys</div>
+        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will be asked to complete a short survey after every three conversations, and a comprehensive summary survey upon completion of all six sessions.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    # st.markdown('</div>', unsafe_allow_html=True)
+
+    st.info(
+        "📋 **Please note:**  As part of the natural flow of discussion, your conversation partner may present various arguments, opinions, or data. "
+        "This information is intended for the purpose of discussion only and has not been verified for factual accuracy by the research team. "
+    )
+
+    # st.markdown('<div class="ui-card">', unsafe_allow_html=True)
+    st.markdown("#### Privacy & Data Use")
+    st.markdown(
+        "This experiment is part of a scientific research project. "
+        "**Your participation is entirely voluntary and is conducted of your own free will**.\n\n"
+        "By completing this experiment, you grant us permission to discuss or publish the results in academic forums. "
+        "In any future publication, the information will be presented in a way that ensures you cannot be personally identified. "
+        "Access to the original raw dataset will be restricted solely to the members of the research team. "
+        "Before any data is shared outside the research team, all potentially identifying information will be removed."
+        "Once de-identified, **the data may be used by the research team or shared with other researchers** for related or future research purposes. "
+        "Furthermore, the anonymous data may be made available in online databases, allowing other researchers and interested parties to use the data for future analysis.\n\n"
+        "By clicking the button at the bottom of this page, you certify that you are at least 18 years of age and agree to participate in this experiment of your own free will.\n\n"
+        "We encourage you to speak freely.\n\n"
+        "Thank you very much for your contribution to the thesis research of Liran Eliav, conducted under the supervision of Dr. Adir Solomon, researchers from the University of Haifa.\n\n"
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown(
+        "<p style='color:#6B7280;font-size:0.9rem'>"
+        "✏️ Please write in English only. &nbsp;·&nbsp; "
+        "🚪 Please note: You are free to withdraw your participation at any time without any consequences. &nbsp;·&nbsp; \n\n"
+        "✉️ To contact us, please email: leliav02@campus.haifa.ac.il"
+        "</p>",
+        unsafe_allow_html=True
+    )
+
     st.divider()
-    if st.button("I understand, let's continue building the profile", type="primary"):
+    if st.button("I understand, let's continue building the profile", type="primary", use_container_width=True):
         st.session_state.stage = "onboarding_profile"
         st.rerun()
 
 def render_onboarding_profile():
-    st.markdown("### 👤 Building your profile")
+    render_stage_progress()
+    st.markdown("""
+    <div style="margin-bottom:1.25rem">
+      <span class="ui-step">Step 1 of 2 — Your Profile</span>
+      <h2 style="margin:0.5rem 0 0.25rem 0">👤 Tell us a little about yourself</h2>
+      <p style="color:#6B7280;margin:0;font-size:0.92rem">All information is anonymous and used for statistical purposes only.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    #st.markdown('<div class="ui-card">', unsafe_allow_html=True)
     with st.form("profile_form", clear_on_submit=False):
         AGE_OPTIONS = ["— Select from the age range —"] + AGE_RANGES
         GENDER_OPTIONS = ["— Select gender —"] + GENDERS
@@ -364,17 +825,41 @@ def render_onboarding_profile():
                 })
                 st.session_state.stage = "onboarding_opinions"
                 st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def render_onboarding_opinions():
-    st.markdown("### 🗣️ Your opinions (up to 800 chars each)")
+    render_stage_progress()
+    st.markdown("""
+    <div style="margin-bottom:1.25rem">
+      <span class="ui-step">Step 2 of 2 — Your Opinions</span>
+      <h2 style="margin:0.5rem 0 0.25rem 0">🗣️ Share your views</h2>
+      <p style="color:#6B7280;margin:0;font-size:0.92rem">Write up to 800 characters per topic. Be honest, there are no right or wrong answers.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
     with st.form("opinions_form", clear_on_submit=False):
         opinions = st.session_state.profile.get("opinions", {})
 
+        st.markdown(
+            '<div style="border-left:4px solid #6C63FF;padding-left:1rem;margin-bottom:0.25rem">'
+            '<strong>Black Lives Matter\n</strong></div>',
+            unsafe_allow_html=True
+        )
         blm = st.text_area("What is your opinion on the topic of 'Black Lives Matter'? *", value=opinions.get("blm", ""), height=140, max_chars=800)
-        guns = st.text_area("What is your opinion on the topic of 'Gun Control'? *", value=opinions.get("guns", ""), height=140, max_chars=800)
-        samesex = st.text_area("What is your opinion on the topic of 'Same-Sex Marriage Legalization'? *", value=opinions.get("samesex", ""), height=140, max_chars=800)
 
-        st.caption(f"Lengths — BLM: {len(blm)}/800 | Guns: {len(guns)}/800 | Same-sex marriage: {len(samesex)}/800")
+        st.markdown(
+            '<div style="border-left:4px solid #00B4D8;padding-left:1rem;margin-bottom:0.25rem;margin-top:1rem">'
+            '<strong>Gun Control</strong></div>',
+            unsafe_allow_html=True
+        )
+        guns = st.text_area("What is your opinion on the topic of 'Gun Control'? *", value=opinions.get("guns", ""), height=140, max_chars=800)
+
+        st.markdown(
+            '<div style="border-left:4px solid #10B981;padding-left:1rem;margin-bottom:0.25rem;margin-top:1rem">'
+            '<strong>Same-Sex Marriage Legalization</strong></div>',
+            unsafe_allow_html=True
+        )
+        samesex = st.text_area("What is your opinion on the topic of 'Same-Sex Marriage Legalization'? *", value=opinions.get("samesex", ""), height=140, max_chars=800)
 
         next_btn = st.form_submit_button("Finish with my opinions", type="primary", use_container_width=True)
 
@@ -493,23 +978,38 @@ Write a single natural Reddit reply that continues the discussion while clearly 
 def build_chat_env_blm():
     @st.dialog("Please wait")
     def _wait_till_finish_system_prompts():
-        with st.spinner("This may take some time ⏳ Please do not close this window. We are preparing the workspace for you."):
+        st.markdown(
+            '<span class="ui-pill" style="background:#6C63FF">Black Lives Matter</span>',
+            unsafe_allow_html=True
+        )
+        st.markdown("#### Finding your conversation partner…")
+        st.caption("Please do not close this window. This usually takes under a minute.")
+        with st.spinner(""):
             topic_map = {
                     "blm": ["black lives matter"],
                     }
-            
+
             meta_blm = load_topic_dataset("blm")
 
-            triples = []  
+            triples = []
             system_prompts_chat1 = {}
             system_prompts_chat2 = {}
 
             progress_bar = st.progress(0)
             progress_text = st.empty()
 
+            STEP_LABELS_BLM = {
+                5: "Starting…",
+                20: "Collecting relevant information…",
+                50: "Selecting the best match…",
+                75: "Updating the system…",
+                90: "Almost ready…",
+                100: "Ready ✅",
+            }
+
             def on_progress(pct: int, msg: str):
                 progress_bar.progress(int(max(0, min(100, pct))))
-                progress_text.info(msg)
+                progress_text.info(STEP_LABELS_BLM.get(pct, msg))
 
             for key in ["blm"]:
                 user_text = st.session_state.profile["opinions"][key]
@@ -551,24 +1051,39 @@ def build_chat_env_blm():
 def build_chat_env_guns():
     @st.dialog("Please wait")
     def _wait_till_finish_system_prompts():
-        with st.spinner("This may take some time ⏳ Please do not close this window. We are preparing the workspace for you."):
-            
+        st.markdown(
+            '<span class="ui-pill" style="background:#00B4D8">Gun Control</span>',
+            unsafe_allow_html=True
+        )
+        st.markdown("#### Finding your conversation partner…")
+        st.caption("Please do not close this window. This usually takes under a minute.")
+        with st.spinner(""):
+
             topic_map = {
                     "guns": ["gun", "gun control"],
                     }
 
             meta_guns = load_topic_dataset("guns")
 
-            triples = []  
+            triples = []
             system_prompts_chat1 = {}
             system_prompts_chat2 = {}
 
             progress_bar = st.progress(0)
             progress_text = st.empty()
 
+            STEP_LABELS_GUNS = {
+                5: "Starting…",
+                20: "Collecting relevant information…",
+                50: "Selecting the best match…",
+                75: "Updating the system…",
+                90: "Almost ready…",
+                100: "Ready ✅",
+            }
+
             def on_progress(pct: int, msg: str):
                 progress_bar.progress(int(max(0, min(100, pct))))
-                progress_text.info(msg)
+                progress_text.info(STEP_LABELS_GUNS.get(pct, msg))
 
             for key in ["guns"]:
                 user_text = st.session_state.profile["opinions"][key]
@@ -610,24 +1125,39 @@ def build_chat_env_guns():
 def build_chat_env_samesex():
     @st.dialog("Please wait")
     def _wait_till_finish_system_prompts():
-        with st.spinner("This may take some time ⏳ Please do not close this window. We are preparing the workspace for you."):
-            
+        st.markdown(
+            '<span class="ui-pill" style="background:#10B981">Same-Sex Marriage</span>',
+            unsafe_allow_html=True
+        )
+        st.markdown("#### Finding your conversation partner…")
+        st.caption("Please do not close this window. This usually takes under a minute.")
+        with st.spinner(""):
+
             topic_map = {
                     "samesex": ["same-sex", "gay", "marriage", "lgbt", "lgbtq"],
                     }
-            
+
             meta_samesex = load_topic_dataset("samesex")
 
-            triples = []  
+            triples = []
             system_prompts_chat1 = {}
             system_prompts_chat2 = {}
 
             progress_bar = st.progress(0)
             progress_text = st.empty()
 
+            STEP_LABELS_SS = {
+                5: "Starting…",
+                20: "Collecting relevant information…",
+                50: "Selecting the best match…",
+                75: "Updating the system…",
+                90: "Almost ready…",
+                100: "Ready ✅",
+            }
+
             def on_progress(pct: int, msg: str):
                 progress_bar.progress(int(max(0, min(100, pct))))
-                progress_text.info(msg)
+                progress_text.info(STEP_LABELS_SS.get(pct, msg))
 
             for key in ["samesex"]:
                 user_text = st.session_state.profile["opinions"][key]
@@ -669,7 +1199,12 @@ def build_chat_env_samesex():
 def build_chat_env_blm_chat2():
     @st.dialog("Please wait")
     def _wait_till_finish_system_prompts():
-        with st.spinner("This may take some time ⏳ Please do not close this window. We are preparing the workspace for you."):
+        st.markdown(
+            '<span class="ui-pill" style="background:#6C63FF">Black Lives Matter</span>',
+            unsafe_allow_html=True
+        )
+        st.markdown("#### Starting your second conversation…")
+        with st.spinner(""):
 
             st.session_state.chat2_messages_blm = None
 
@@ -681,7 +1216,12 @@ def build_chat_env_blm_chat2():
 def build_chat_env_guns_chat2():
     @st.dialog("Please wait")
     def _wait_till_finish_system_prompts():
-        with st.spinner("This may take some time ⏳ Please do not close this window. We are preparing the workspace for you."):
+        st.markdown(
+            '<span class="ui-pill" style="background:#00B4D8">Gun Control</span>',
+            unsafe_allow_html=True
+        )
+        st.markdown("#### Starting your second conversation…")
+        with st.spinner(""):
 
             st.session_state.chat2_messages_guns = None
 
@@ -693,7 +1233,12 @@ def build_chat_env_guns_chat2():
 def build_chat_env_samesex_chat2():
     @st.dialog("Please wait")
     def _wait_till_finish_system_prompts():
-        with st.spinner("This may take some time ⏳ Please do not close this window. We are preparing the workspace for you."):
+        st.markdown(
+            '<span class="ui-pill" style="background:#10B981">Same-Sex Marriage</span>',
+            unsafe_allow_html=True
+        )
+        st.markdown("#### Starting your second conversation…")
+        with st.spinner(""):
 
             st.session_state.chat2_messages_samesex = None
 
@@ -703,8 +1248,24 @@ def build_chat_env_samesex_chat2():
     _wait_till_finish_system_prompts()
 
 def render_chat(title, messages_key, base_prompt_key, next_button_label, next_stage, key, topic):
-    
-    st.title(f"💬 {title}")
+    render_stage_progress()
+
+    color = TOPIC_COLORS.get(topic, "#5B52F0")
+    label_text = TOPIC_LABELS.get(topic, topic.upper())
+
+    turns_so_far = user_turns(st.session_state.get(messages_key) or [])
+    st.markdown(
+        f'<div class="chat-header">'
+        f'  <div class="chat-header-left">'
+        f'    <span class="ui-pill" style="background:{color};margin:0">{label_text}</span>'
+        f'    <div>'
+        f'      <div class="chat-header-topic">{title}</div>'
+        f'    </div>'
+        f'  </div>'
+        f'  <span class="chat-turn-badge">Turn {min(turns_so_far, MAX_TURNS)} / {MAX_TURNS}</span>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
     
     model ="gpt-5-mini"
     temperature = 0.8
@@ -727,8 +1288,11 @@ def render_chat(title, messages_key, base_prompt_key, next_button_label, next_st
     seeded_key = f"{messages_key}_seeded"
     st.session_state.setdefault(seeded_key, False)
 
+    pending_key = f"{messages_key}_pending_response"
+    st.session_state.setdefault(pending_key, False)
+
     if len(st.session_state[messages_key]) == 1:
-        print("len=1")
+        #print("len=1")
         topic_key = st.session_state.get("start_topic_key")
         opinions = (st.session_state.get("profile", {}) or {}).get("opinions", {}) or {}
 
@@ -760,7 +1324,7 @@ def render_chat(title, messages_key, base_prompt_key, next_button_label, next_st
                     model=model,
                     #temperature=temperature,
                     messages=st.session_state[messages_key],                              # includes system+history
-                    max_completion_tokens=1000,#16384,
+                    max_completion_tokens=8000,#16384,
                     stop=None,
                     stream=False
                 )
@@ -799,12 +1363,56 @@ def render_chat(title, messages_key, base_prompt_key, next_button_label, next_st
             elif role == "assistant" and asst_i < len(st.session_state[assistant_scores_key]):
                 asst_i += 1
 
+    typing_placeholder = st.empty()
+
     turns = user_turns(st.session_state[messages_key])
-    st.caption(f"Turns used: **{turns} / {MAX_TURNS}** (user messages)")
+    turn_pct = min(turns / MAX_TURNS, 1.0)
+    st.markdown(
+        f'<div style="margin:1rem 0 0.2rem 0">'
+        f'<div style="background:#E5E7EB;border-radius:99px;height:7px;overflow:hidden">'
+        f'<div style="width:{int(turn_pct*100)}%;height:7px;border-radius:99px;background:linear-gradient(90deg,#5B52F0,#00C4E8);transition:width 0.4s ease"></div>'
+        f'</div>'
+        f'<p style="font-size:0.8rem;color:#6B7280;margin:0.3rem 0 0 0;text-align:right;font-weight:500">'
+        f'Turn {turns} of {MAX_TURNS}</p>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
+    if st.session_state.get(pending_key):
+        with typing_placeholder.container():
+            st.markdown(
+                '<div class="typing-bubble">'
+                '<div class="typing-dot"></div>'
+                '<div class="typing-dot"></div>'
+                '<div class="typing-dot"></div>'
+                '</div>',
+                unsafe_allow_html=True
+            )
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=st.session_state[messages_key],
+                max_completion_tokens=8000,
+                stop=None,
+                stream=False
+            )
+            assistant_text = resp.choices[0].message.content
+        except Exception as e:
+            assistant_text = f"⚠️ API error: {e}"
+        typing_placeholder.empty()
+        st.session_state[messages_key].append({"role": "assistant", "content": assistant_text})
+        try:
+            asst_scores = measuring_toxicity(assistant_text)
+            asst_tox = float(asst_scores.get("toxic", 0.0))
+        except Exception:
+            asst_tox = 0.0
+        st.session_state[assistant_scores_key].append(asst_tox)
+        st.session_state[pending_key] = False
+        st.rerun()
 
     if turns == MAX_TURNS:
-        st.success("You have reached the limit of turns in this conversation")
-        if st.button(next_button_label, use_container_width=True):
+        st.success("✅ You have reached the turn limit for this conversation.")
+        if st.button(next_button_label, type="primary", use_container_width=True):
             st.session_state.stage = next_stage
             st.rerun()
             u = st.session_state[user_scores_key]
@@ -815,77 +1423,58 @@ def render_chat(title, messages_key, base_prompt_key, next_button_label, next_st
             print(f"Assistant toxicity maximum: **{(max(a)):.3f}**")
         return
 
-    # Chat input 
-    if prompt := st.chat_input("Write your message...", disabled=(turns == MAX_TURNS)):
-        # Show the user's message immediately
+    if prompt := st.chat_input(
+        "Write your message...",
+        disabled=(turns == MAX_TURNS) or st.session_state.get(pending_key, False)
+    ):
         st.session_state[messages_key].append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar=USER_AVATAR):
-            st.markdown(prompt)
-            print("User: ", prompt) #user input
-
         try:
-            user_scores = measuring_toxicity(prompt)         # {'non-toxic': p, 'toxic': q}
+            user_scores = measuring_toxicity(prompt)
             user_tox = float(user_scores.get("toxic", 0.0))
-        except Exception as e:
+        except Exception:
             user_tox = 0.0
-            st.warning(f"Toxicity (user) measurement failed: {e}")
         st.session_state[user_scores_key].append(user_tox)
         st.session_state[turns_key] = list(range(1, len(st.session_state[user_scores_key]) + 1))
-
-        # Generate assistant reply via OpenAI Chat Completions API
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                #temperature=temperature,
-                messages=st.session_state[messages_key],  # includes system+history
-            )
-            assistant_text = resp.choices[0].message.content
-        except Exception as e:
-            assistant_text = f"⚠️ API error: {e}"
-
-        # Display and save the assistant reply
-        with st.chat_message("assistant", avatar=ASSISTANT_AVATAR):
-            st.markdown(assistant_text)
-            print("Persona: ",assistant_text) #persona respond
-        st.session_state[messages_key].append({"role": "assistant", "content": assistant_text})
-
-        try:
-            asst_scores = measuring_toxicity(assistant_text)
-            asst_tox = float(asst_scores.get("toxic", 0.0))
-        except Exception as e:
-            asst_tox = 0.0
-            st.warning(f"Toxicity (assistant) measurement failed: {e}")
-        st.session_state[assistant_scores_key].append(asst_tox)
-
-        turns = user_turns(st.session_state[messages_key])
-        st.caption(f"Turns used: **{turns} / {MAX_TURNS}** (user messages)")
-
-        if user_turns(st.session_state[messages_key]) == MAX_TURNS: 
-            st.toast("You have reached the turn limit in this conversation. Click the button to continue.", icon="✅")
-            st.rerun()
+        st.session_state[pending_key] = True
+        st.rerun()
 
 def render_survey_chat_1(next_stage, next_button_label):
-    st.title("📝 Short survey - end of the first round of conversations")
-    st.caption("Please answer all questions to activate the next button")
+    render_stage_progress()
+    st.markdown("""
+    <div class="ui-hero">
+      <h1>📝 Mid-Point Survey</h1>
+      <p>You are halfway through — please take a moment to reflect on your conversations so far.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption(f"Please answer all {len(SURVEY_chat)} questions to continue.")
 
     with st.form("survey_chat1_form", clear_on_submit=False):
-        for q in SURVEY_chat:
+        for i, q in enumerate(SURVEY_chat):
             qid = q["id"]
             key = f"survey_1_{qid}"
 
+            st.markdown(
+                f'<div class="q-block">'
+                f'<span class="q-num">{i+1}</span>'
+                f'<span class="q-text">{q["label"]}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
             if q["type"] == "scale":
-                # radio with placeholder -> forces explicit user choice
                 scale_opts = list(range(int(q["min"]), int(q["max"]) + 1))
                 options = ["-- Select --"] + scale_opts
-
-                idx = 0  # placeholder selected
-
-                st.radio(q["label"], options=options, index=idx, key=key, horizontal=True)
+                idx = 0
+                st.radio("", options=options, index=idx, key=key, horizontal=True, label_visibility="collapsed")
 
             else:  # text
-                st.text_area(q["label"], value=st.session_state.survey_1.get(qid, ""), key=key, height=100)
+                st.text_area("", value=st.session_state.survey_1.get(qid, ""), key=key, height=100, label_visibility="collapsed")
 
-        submitted = st.form_submit_button("Done with this survey")
+        submitted = st.form_submit_button(
+            "Done with this survey",
+            disabled=st.session_state.get("survey_1_submitted", False),
+            use_container_width=True
+        )
 
     if submitted:
         answers = {}
@@ -913,6 +1502,7 @@ def render_survey_chat_1(next_stage, next_button_label):
                     st.write(f"- {m}")
         else:
             st.session_state.survey_1 = answers
+            st.session_state.survey_1_submitted = True
 
     # Gate the Finish button: require all answers present and valid
     all_done = (
@@ -926,32 +1516,50 @@ def render_survey_chat_1(next_stage, next_button_label):
     )
 
     st.divider()
-    if st.button(next_button_label, type="primary", disabled=not all_done, use_container_width=True):
+    if all_done:
+    #     st.success("✅ All answers saved — click **Continue** below to proceed.")
+    # if st.button(next_button_label, type="primary", disabled=not all_done, use_container_width=True):
         st.session_state.stage = next_stage
         st.rerun()
+    
 
 def render_survey_chat_2(next_stage, next_button_label):
-    st.title("📝 Short survey - end of the second round of conversations")
-    st.caption("Please answer all questions to activate the next button")
+    render_stage_progress()
+    st.markdown("""
+    <div class="ui-hero">
+      <h1>📝 Mid-Point Survey</h1>
+      <p>Almost there — please reflect on the second set of conversations.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption(f"Please answer all {len(SURVEY_chat)} questions to continue.")
 
     with st.form("survey_chat2_form", clear_on_submit=False):
-        for q in SURVEY_chat:
+        for i, q in enumerate(SURVEY_chat):
             qid = q["id"]
             key = f"survey_2_{qid}"
 
+            st.markdown(
+                f'<div class="q-block">'
+                f'<span class="q-num">{i+1}</span>'
+                f'<span class="q-text">{q["label"]}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
             if q["type"] == "scale":
-                # radio with placeholder -> forces explicit user choice
                 scale_opts = list(range(int(q["min"]), int(q["max"]) + 1))
                 options = ["-- Select --"] + scale_opts
-
-                idx = 0  # placeholder selected
-
-                st.radio(q["label"], options=options, index=idx, key=key, horizontal=True)
+                idx = 0
+                st.radio("", options=options, index=idx, key=key, horizontal=True, label_visibility="collapsed")
 
             else:  # text
-                st.text_area(q["label"], value=st.session_state.survey_2.get(qid, ""), key=key, height=100)
+                st.text_area("", value=st.session_state.survey_2.get(qid, ""), key=key, height=100, label_visibility="collapsed")
 
-        submitted = st.form_submit_button("Done with this survey")
+        submitted = st.form_submit_button(
+            "Done with this survey",
+            disabled=st.session_state.get("survey_2_submitted", False),
+            use_container_width=True
+        )
 
     if submitted:
         answers = {}
@@ -979,6 +1587,7 @@ def render_survey_chat_2(next_stage, next_button_label):
                     st.write(f"- {m}")
         else:
             st.session_state.survey_2 = answers
+            st.session_state.survey_2_submitted = True
 
     # Gate the Finish button: require all answers present and valid
     all_done = (
@@ -992,37 +1601,53 @@ def render_survey_chat_2(next_stage, next_button_label):
     )
 
     st.divider()
-    if st.button(next_button_label, type="primary", disabled=not all_done, use_container_width=True):
+    if all_done:
+    #     st.success("✅ All answers saved — click **Continue** below to proceed.")
+    # if st.button(next_button_label, type="primary", disabled=not all_done, use_container_width=True):
         st.session_state.stage = next_stage
         st.rerun()
 
 def render_survey_finish(next_stage, next_button_label):
-    st.title("📝 Final Survey")
-    st.caption("Please answer all questions to activate the finish button.")
+    render_stage_progress()
+    st.markdown("""
+    <div class="ui-hero">
+      <h1>📝 Final Survey</h1>
+      <p>Last step — your overall reflections on the full experience.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption(f"Please answer all {len(SURVEY_finish)} questions to finish.")
 
     with st.form("survey_finish_form", clear_on_submit=False):
-        for q in SURVEY_finish:
+        for i, q in enumerate(SURVEY_finish):
             qid = q["id"]
             key = f"survey_finish_{qid}"
 
+            st.markdown(
+                f'<div class="q-block">'
+                f'<span class="q-num">{i+1}</span>'
+                f'<span class="q-text">{q["label"]}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
             if q["type"] == "scale":
-                # radio with placeholder -> forces explicit user choice
                 scale_opts = list(range(int(q["min"]), int(q["max"]) + 1))
                 options = ["-- Select --"] + scale_opts
-
-                # restore previous answer if any, else show placeholder
                 prev = st.session_state.survey_finish.get(qid)
                 if isinstance(prev, (int, float)) and int(prev) in scale_opts:
                     idx = options.index(int(prev))
                 else:
-                    idx = 0  # placeholder selected
-
-                st.radio(q["label"], options=options, index=idx, key=key, horizontal=True)
+                    idx = 0
+                st.radio("", options=options, index=idx, key=key, horizontal=True, label_visibility="collapsed")
 
             else:  # text
-                st.text_area(q["label"], value=st.session_state.survey_finish.get(qid, ""), key=key, height=100)
+                st.text_area("", value=st.session_state.survey_finish.get(qid, ""), key=key, height=100, label_visibility="collapsed")
 
-        submitted = st.form_submit_button("Done with this survey")
+        submitted = st.form_submit_button(
+            "Done with this survey",
+            disabled=st.session_state.get("survey_finish_submitted", False),
+            use_container_width=True
+        )
 
     if submitted:
         answers = {}
@@ -1050,6 +1675,7 @@ def render_survey_finish(next_stage, next_button_label):
                     st.write(f"- {m}")
         else:
             st.session_state.survey_finish = answers
+            st.session_state.survey_finish_submitted = True
 
     # Gate the Finish button: require all answers present and valid
     all_done = (
@@ -1063,45 +1689,81 @@ def render_survey_finish(next_stage, next_button_label):
     )
 
     st.divider()
-    if st.button(next_button_label, type="primary", disabled=not all_done, use_container_width=True):
+    if all_done:
+    #     st.success("✅ All answers saved — click **Continue** below to proceed.")
+    # if st.button(next_button_label, type="primary", disabled=not all_done, use_container_width=True):
         st.session_state.stage = next_stage
         st.rerun()
 
 def render_due_disclosure():
+    render_stage_progress()
 
-    st.markdown("### Thank you for your contribution!")
+    st.markdown("""
+    <div class="ui-hero">
+      <h1>🙏 Thank you for your contribution!</h1>
+      <p>One final step before we finish.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    #st.markdown('<div class="ui-card">', unsafe_allow_html=True)
+    st.markdown("#### Full Disclosure")
     st.markdown(
-        """
-At this stage, we would like to provide you with additional and complete information regarding the objectives of the study. Please be advised that this study involved temporary deception concerning the identity of your conversation partner. While the interlocutor was initially presented as a "partner," the conversations were actually conducted with an advanced Artificial Intelligence (LLM) system simulating different personas.
-
-The use of the term "conversation partner" was essential to ensure that the interaction remained as natural and authentic as possible. Research indicates that prior knowledge of interacting with a "bot" significantly alters communication patterns (e.g., using shorter, simplified sentences) and reduces emotional engagement. This is why it was necessary to neutralize the "technological stigma" and allow you to express yourself freely, as you would with another person.
-
-Our ultimate goal is to learn how to harness this technology to make the internet a more respectful and safer environment for everyone.
-
-Now that the research goals and the necessity for deception have been explained, we request your final permission to include your anonymous responses in our scientific analysis. If you have any further questions or concerns regarding the use of deception in this study, please feel free to contact us at: leliav02@campus.haifa.ac.il
-
-
-Do you grant permission for the research team to use your anonymized conversation data? 
-"""
+        "At this stage, we would like to provide you with additional and complete information regarding the objectives of the study. "
+        "Please be advised that this study involved temporary deception concerning the identity of your conversation partner. "
     )
+    st.warning(
+        'While the interlocutor was initially presented as a "partner", '
+        "the conversations were actually conducted with an advanced Artificial Intelligence (LLM) system "
+        "simulating different personas."
+    )
+    st.markdown(
+        'The use of the term "conversation partner" was essential to ensure that the interaction remained as natural and authentic as possible. '
+        'Research indicates that prior knowledge of interacting with a "bot" significantly alters communication patterns '
+        '(e.g., using shorter, simplified sentences) and reduces emotional engagement.\n\n'
+        'This is why it was necessary to neutralize the "technological stigma" and allow you to express yourself freely, as you would with another person. '
+        "\n\n"
+        "Our ultimate goal is to learn how to harness this technology to make the internet a more respectful and safer environment for everyone. "
+        "\n\n"
+        "Now that the research goals and the necessity for deception have been explained, "
+        "we request your final permission to include your anonymous responses in our scientific analysis. "
+        "If you have any further questions or concerns regarding the use of deception in this study, "
+        "please feel free to contact us at: leliav02@campus.haifa.ac.il "
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("#### Do you grant permission for the research team to use your anonymized conversation data?")
     st.divider()
-    if st.button("I AGREE", type="primary", use_container_width=True):
+
+    if st.button("✅ I AGREE", use_container_width=True):
         save_into_firebase(st.session_state)
         st.session_state.stage = "thanks"
         st.rerun()
 
-    elif st.button("I DO NOT AGREE - Delete my data", type="primary", use_container_width=True):
+    elif st.button("❌ I DO NOT AGREE - Delete my data", use_container_width=True):
         st.session_state.stage = "not_save"
         st.rerun()
 
 
+
 def render_thanks():
-    st.title("🎉 We thank you for your participation!")
-    st.success("Your comments have been saved.")
+    render_stage_progress()
+    st.markdown("""
+    <div class="ui-hero" style="text-align:center">
+      <h1>🎉 Thank you!</h1>
+      <p>Your responses have been saved. Your contribution is greatly appreciated.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.success("Your anonymized data has been securely stored. You may now close this window.")
 
 def render_not_save():
-    st.title("We thank you for your time!")
-    st.success("Your comments were not saved.")
+    render_stage_progress()
+    st.markdown("""
+    <div class="ui-hero" style="background:linear-gradient(135deg,#6B7280,#9CA3AF);text-align:center">
+      <h1>Thank you for your time</h1>
+      <p>Your data has not been saved, as per your choice.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.info("No data from your session has been retained. You may now close this window.")
 
 #-------------------------------------------------------------------------------------------------------------------------------------
 
