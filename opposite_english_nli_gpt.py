@@ -78,7 +78,7 @@ def gpt_rerank_contradiction(
     user_opinion: str,
     candidates: List[Dict],                 # each: {'id', 'text', 'topic'(opt), 'cosine'(opt)}
     model: str = "gpt-5-mini",
-    batch_size: int = 40
+    batch_size: int = 8
 ) -> List[Dict]:
     """
     Returns the same list with 'gpt_contra' and 'gpt_rationale' added, sorted by gpt_contra desc.
@@ -130,62 +130,96 @@ def gpt_rerank_contradiction(
     enriched.sort(key=lambda x: x["gpt_contra"], reverse=True)
     return enriched
 
+SYSTEM_USER_STANCE = """\
+You are a careful stance classifier.
+Classify the user's opinion toward the given topic.
+Return strict JSON only:
+{"stance_label": "pro" | "anti" | "neutral_or_mixed" | "irrelevant", "confidence": 0.0-1.0, "short_reason": "..."}
+"""
 
-# ===============================
-# NLI (multilingual) – fast proxy
-# ===============================
-# @st.cache_resource(show_spinner=False)
-# def load_nli(model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"):
-#     device = "cuda" if torch.cuda.is_available() else "cpu"
-#     mdl = SentenceTransformer(model_name, device=device)
-#     return mdl
+def topic_definition_for_user(topic_key: str) -> str:
+    topic_key = str(topic_key).lower()
 
-# @torch.inference_mode()
-# def nli_contradiction_proxy(
-#     premise: str,
-#     hypotheses: List[str],
-#     nli_model: SentenceTransformer,
-#     batch_size: int = 64  #48# Increased from 48 for faster processing
-# ) -> np.ndarray:
-#     """
-#     Fast proxy using a SBERT-style NLI checkpoint:
-#     encode [premise, hypothesis] pairs and map to a 0..1 'contradiction-ish' score.
-#     (If you have a proper XNLI cross-encoder with logits, swap this for true P(contradiction).)
-#     """
-#     pairs = [[premise, h] for h in hypotheses]
-#     embs = nli_model.encode(
-#         pairs, convert_to_tensor=True, batch_size=batch_size, show_progress_bar=False
-#     )
-#     if embs.dim() == 2:
-#         # crude mapping to [0..1]
-#         scores = torch.tanh(-embs.norm(dim=1))
-#         probs = (scores - scores.min()) / (scores.max() - scores.min() + 1e-8)
-#     else:
-#         probs = torch.full((len(hypotheses),), 0.5)
+    if topic_key in ("blm", "black lives matter"):
+        return """
+Topic: Black Lives Matter.
+pro = supports BLM, racial justice framing, systemic racism/police brutality concerns, or BLM-related reform.
+anti = criticizes BLM, calls it racist/divisive/violent/useless/nonsense, rejects systemic racism framing, or supports All Lives Matter against BLM.
+neutral_or_mixed = unclear, balanced, both sides, or not enough stance.
+irrelevant = not actually about BLM.
+"""
 
-#     return probs.detach().cpu().numpy().astype("float32")
+    if topic_key in ("guns", "gun", "gun control"):
+        return """
+Topic: Gun control.
+pro = supports stricter gun control, restrictions, bans, background checks, or reducing gun access.
+anti = opposes gun control, supports gun rights, Second Amendment framing, or argues restrictions are harmful/useless.
+neutral_or_mixed = unclear, balanced, both sides, or not enough stance.
+irrelevant = not actually about gun control.
+"""
 
-# def rerank_with_nli_only(
-#     user_text: str,
-#     pool_rows: List[Dict],
-#     *,
-#     nli_model: SentenceTransformer
-# ) -> List[Dict]:
-#     if not pool_rows:
-#         return []
+    if topic_key in ("samesex", "same-sex", "same sex marriage", "same-sex marriage"):
+        return """
+Topic: Same-sex marriage legalization.
+pro = supports same-sex marriage, marriage equality, LGBT marriage rights, or equal legal recognition.
+anti = opposes same-sex marriage or rejects marriage equality.
+neutral_or_mixed = unclear, balanced, both sides, or not enough stance.
+irrelevant = not actually about same-sex marriage.
+"""
 
-#     hyps = [str(r.get("comment_text", "")) for r in pool_rows]
-#     nli_p = nli_contradiction_proxy(user_text, hyps, nli_model=nli_model, batch_size=48)
+    return f"Topic: {topic_key}"
 
-#     order = np.argsort(-nli_p)  # descending
 
-#     ranked = []
-#     for i in order.tolist():
-#         r = dict(pool_rows[i])
-#         r["nli_contradiction"] = float(nli_p[i])
-#         r["combined_score"] = float(nli_p[i])  # final blend happens after GPT
-#         ranked.append(r)
-#     return ranked
+def classify_user_stance_with_gpt(
+    user_opinion: str,
+    topic_key: str,
+    model: str = "gpt-5-mini",
+) -> dict:
+    prompt = f"""
+{topic_definition_for_user(topic_key)}
+
+User opinion:
+{user_opinion}
+
+Classify the user's stance toward the topic.
+Return JSON only.
+"""
+
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_USER_STANCE},
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    txt = resp.choices[0].message.content.strip()
+
+    try:
+        return json.loads(txt)
+    except Exception:
+        start = txt.find("{")
+        end = txt.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(txt[start:end + 1])
+
+    return {
+        "stance_label": "neutral_or_mixed",
+        "confidence": 0.0,
+        "short_reason": "parse_error",
+    }
+
+
+def opposite_stance_of(label: str) -> Optional[str]:
+    label = str(label).strip().lower()
+
+    if label == "pro":
+        return "anti"
+
+    if label == "anti":
+        return "pro"
+
+    return None
 
 @st.cache_resource(show_spinner=False)
 def load_nli(model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"):
@@ -310,9 +344,53 @@ def build_pool_topic_only(
     return pool
 
 
-# def _load_artifacts(path: str):
-#     meta, embs, index, encoder = load_english(path)  # expects config-trained encoder, l2-normalized embs
-#     return meta, embs, index, encoder
+def build_pool_opposite_stance(
+    *,
+    meta: pd.DataFrame,
+    opposite_stance: str,
+    K: int,
+    text_col: str = "comment_text",
+    stance_col: str = "stance_label",
+    min_confidence: float = 0.60,
+    random_seed: int = 42,
+) -> List[Dict]:
+    """
+    Candidate pool using precomputed stance labels.
+    Keeps only rows with stance_label == opposite_stance.
+    """
+
+    if stance_col not in meta.columns:
+        raise ValueError(
+            f"meta missing '{stance_col}'. "
+            "Use the new GPT-classified meta.parquet with pro/anti labels."
+        )
+    else:
+        labels = meta[stance_col].fillna("").astype(str).str.lower().str.strip()
+        mask = labels.eq(opposite_stance)
+
+        if "confidence" in meta.columns:
+            conf = pd.to_numeric(meta["confidence"], errors="coerce").fillna(0.0)
+            mask = mask & (conf >= min_confidence)
+
+        idxs = np.flatnonzero(mask.values)
+
+    if idxs.size == 0:
+        print(f"No rows found for opposite stance: {opposite_stance}")
+        return []
+
+    rng = np.random.default_rng(random_seed)
+
+    if idxs.size > K:
+        idxs = rng.choice(idxs, size=K, replace=False)
+
+    pool: List[Dict] = []
+
+    for i in idxs.tolist():
+        row = meta.iloc[i].to_dict()
+        row["row_index"] = i
+        pool.append(row)
+
+    return pool
 
 def make_topic_mask_english(
     meta: pd.DataFrame,
@@ -404,8 +482,8 @@ def run_opposite_pipeline_and_render(
     meta,
     #embs, index, encoder,
     # retrieval / ranking knobs
-    pool_size: int = 200,  # Reduced from 100 for faster processing
-    k2_short: int = 15,    # Reduced from 5 for faster GPT calls
+    pool_size: int = 120,  # 200 #NLI = 120 rows
+    k2_short: int = 8,    # 5 #GPT = 8 rows
     nli_model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli",
     use_gpt: bool = True,
     gpt_model: str = "gpt-5-mini",
@@ -467,13 +545,67 @@ def run_opposite_pipeline_and_render(
 
     # --- 1) Topic pool (NO cosine) ---
     _prog(20, "Elevate the conversation environment")
-    pool_rows = build_pool_topic_only(meta=meta, topic_kws=kws, K=pool_size, text_col="comment_text")
+    topic_key_for_stance = kws[0] if kws else ""
+
+    user_stance_info = classify_user_stance_with_gpt(
+        user_opinion=user_opinion,
+        topic_key=topic_key_for_stance,
+        model=gpt_model,
+    )
+
+    user_stance = str(user_stance_info.get("stance_label", "neutral_or_mixed")).lower().strip()
+    opposite_stance = opposite_stance_of(user_stance)
+
+    timings["user_stance"] = user_stance
+    timings["user_stance_confidence"] = float(user_stance_info.get("confidence", 0.0) or 0.0)
+    timings["user_stance_reason"] = str(user_stance_info.get("short_reason", ""))
+
+    print("User stance:", user_stance_info)
+    print("Opposite stance:", opposite_stance)
+
+    if opposite_stance is None:
+        # fallback for unclear users: use both pro and anti, but this is less ideal
+        print("User stance unclear. Falling back to topic-only pool.")
+        pool_rows = build_pool_topic_only(
+            meta=meta,
+            topic_kws=kws,
+            K=pool_size,
+            text_col="comment_text"
+        )
+    else:
+        pool_rows = build_pool_opposite_stance(
+            meta=meta,
+            opposite_stance=opposite_stance,
+            K=pool_size,
+            text_col="comment_text",
+            stance_col="stance_label",
+            min_confidence=0.60,
+            random_seed=42,
+        )
+
     t1 = time.time()
     timings["pool_ms"] = int((t1 - t0) * 1000)
 
     if not pool_rows:
         #st.info("No candidates found. Try broader topic keywords.")
-        return [], timings
+        print("No opposite-stance candidates found. Falling back to all pro/anti rows.")
+
+        if "stance_label" in meta.columns:
+            fallback_meta = meta[
+                meta["stance_label"].fillna("").astype(str).str.lower().isin(["pro", "anti"])
+            ].copy()
+        else:
+            fallback_meta = meta
+
+        pool_rows = build_pool_topic_only(
+            meta=fallback_meta,
+            topic_kws=kws,
+            K=pool_size,
+            text_col="comment_text"
+        )
+
+        if not pool_rows:
+            return [], timings
 
     # --- 2) NLI re-rank ---
     _prog(50, "Collecting relevant information...")
@@ -499,7 +631,7 @@ def run_opposite_pipeline_and_render(
             txt = str(r.get("comment_text", ""))
             candidates.append({"id": rid, "text": txt, "topic": "", "row": r})
 
-        gpt_ranked = gpt_rerank_fn(user_opinion, candidates, model=gpt_model, batch_size=4)#8)
+        gpt_ranked = gpt_rerank_fn(user_opinion, candidates, model=gpt_model, batch_size=8)#8)
 
         # Final blend: β * NLI + γ * GPT
         out = []
@@ -538,6 +670,19 @@ def run_opposite_pipeline_and_render(
     # --- 4) Enrich top-k with same-author/same-topic history ---
     _prog(90, "Just a moment, almost there...")
     enriched_top: List[Dict] = []
+
+    #debugging
+    print("\n===== FINAL SELECTED OPPOSITE COMMENTS =====")
+    for debug_i, debug_r in enumerate(ranked[:top_k_show], 1):
+        print(f"\nTOP {debug_i}")
+        print("stance_label:", debug_r.get("stance_label"))
+        print("confidence:", debug_r.get("confidence"))
+        print("nli_contradiction:", debug_r.get("nli_contradiction"))
+        print("gpt_contradiction:", debug_r.get("gpt_contradiction"))
+        print("combined_score:", debug_r.get("combined_score"))
+        print("text:", str(debug_r.get("comment_text", ""))[:1000])
+        #end debbugging
+
     for r in ranked[:top_k_show]:
         others: List[str] = []
         if include_author_threads and other_comments_fn is not None:
@@ -561,32 +706,32 @@ def run_opposite_pipeline_and_render(
 
 
 
-if __name__ == "__main__":  
+#if __name__ == "__main__":  
     #meta, embs, index, encoder = _load_artifacts("./english")
-    ART_DIR = Path("./english")
-    META_PATH = ART_DIR / "meta.parquet"
+    # ART_DIR = Path("./english")
+    # META_PATH = ART_DIR / "meta.parquet"
 
-    if not META_PATH.exists():
-        raise FileNotFoundError(
-            f"Missing artifacts in {ART_DIR}. Need: config.json, meta.parquet, embeddings.npy (and optionally hnsw_cosine.bin)."
-        )
+    # if not META_PATH.exists():
+    #     raise FileNotFoundError(
+    #         f"Missing artifacts in {ART_DIR}. Need: config.json, meta.parquet, embeddings.npy (and optionally hnsw_cosine.bin)."
+    #     )
 
-    meta = pd.read_parquet(META_PATH)
-    print("hi")
-    # ranked, timings = run_opposite_pipeline_and_render(user_opinion="ביבי הרס לנו את המדינה", topic_keywords=["בנימין נתניהו","ביבי"], meta=meta, embs=embs, index=index, encoder=encoder)
-    # print(ranked)
-    # print(timings)
+    # meta = pd.read_parquet(META_PATH)
+    # print("hi")
+    # # ranked, timings = run_opposite_pipeline_and_render(user_opinion="ביבי הרס לנו את המדינה", topic_keywords=["בנימין נתניהו","ביבי"], meta=meta, embs=embs, index=index, encoder=encoder)
+    # # print(ranked)
+    # # print(timings)
 
-    ranked, timings = run_opposite_pipeline_and_render(user_opinion="just making a huge mess", topic_keywords=["black lives matter"], meta=meta, pool_size=100,)
-    all_comments = []
-    for i, item in enumerate(ranked, 1):
-        row = item["row"]
-        print(f"\n### TOP {i} ###")
-        print(row.get("comment_text", ""))  # main opposite comment
-        all_comments.append(row.get("comment_text", ""))
-        for j, t in enumerate(item.get("other_by_author", []), 1):
-            print(f"[other {j}] {t}")
-            all_comments.append(t)
+    # ranked, timings = run_opposite_pipeline_and_render(user_opinion="just making a huge mess", topic_keywords=["black lives matter"], meta=meta, pool_size=100,)
+    # all_comments = []
+    # for i, item in enumerate(ranked, 1):
+    #     row = item["row"]
+    #     print(f"\n### TOP {i} ###")
+    #     print(row.get("comment_text", ""))  # main opposite comment
+    #     all_comments.append(row.get("comment_text", ""))
+    #     for j, t in enumerate(item.get("other_by_author", []), 1):
+    #         print(f"[other {j}] {t}")
+    #         all_comments.append(t)
 
-    print(all_comments)
-    print("Timings (ms):", timings)
+    # print(all_comments)
+    # print("Timings (ms):", timings)
