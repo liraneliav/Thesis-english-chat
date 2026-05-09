@@ -169,6 +169,100 @@ irrelevant = not actually about same-sex marriage.
 
     return f"Topic: {topic_key}"
 
+def safe_parse_user_stance(txt: str) -> dict:
+    txt = (txt or "").strip()
+
+    # Remove markdown fences if GPT adds them
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    # First try normal JSON
+    try:
+        data = json.loads(txt)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    # Try extracting JSON-looking substring
+    start = txt.find("{")
+    end = txt.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        sub = txt[start:end + 1]
+        try:
+            data = json.loads(sub)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+
+    # Last-resort regex fallback
+    lowered = txt.lower()
+
+    stance = "neutral_or_mixed"
+    for label in ["pro", "anti", "neutral_or_mixed", "irrelevant"]:
+        if re.search(rf'"?stance_label"?\s*:\s*"?{re.escape(label)}"?', lowered):
+            stance = label
+            break
+
+    conf = 0.0
+    m = re.search(r'"?confidence"?\s*:\s*([0-9]*\.?[0-9]+)', lowered)
+    if m:
+        try:
+            conf = float(m.group(1))
+        except Exception:
+            conf = 0.0
+
+    reason = "malformed_json_fallback"
+    m = re.search(r'"?short_reason"?\s*:\s*"([^"]*)"', txt)
+    if m:
+        reason = m.group(1)
+
+    return {
+        "stance_label": stance,
+        "confidence": conf,
+        "short_reason": reason,
+        "raw_response": txt[:500],
+    }
+
+
+# def classify_user_stance_with_gpt(
+#     user_opinion: str,
+#     topic_key: str,
+#     model: str = "gpt-5-mini",
+# ) -> dict:
+#     prompt = f"""
+# {topic_definition_for_user(topic_key)}
+
+# User opinion:
+# {user_opinion}
+
+# Classify the user's stance toward the topic.
+# Return JSON only.
+# """
+
+#     resp = client.chat.completions.create(
+#         model=model,
+#         messages=[
+#             {"role": "system", "content": SYSTEM_USER_STANCE},
+#             {"role": "user", "content": prompt},
+#         ],
+#     )
+
+#     txt = resp.choices[0].message.content.strip()
+
+#     try:
+#         return json.loads(txt)
+#     except Exception:
+#         start = txt.find("{")
+#         end = txt.rfind("}")
+#         if start != -1 and end != -1 and end > start:
+#             return json.loads(txt[start:end + 1])
+
+#     return {
+#         "stance_label": "neutral_or_mixed",
+#         "confidence": 0.0,
+#         "short_reason": "parse_error",
+#     }
 
 def classify_user_stance_with_gpt(
     user_opinion: str,
@@ -182,31 +276,54 @@ User opinion:
 {user_opinion}
 
 Classify the user's stance toward the topic.
-Return JSON only.
+
+Return ONLY valid JSON.
+Do not include markdown.
+Do not include explanation outside the JSON.
+
+Required format:
+{{
+  "stance_label": "pro",
+  "confidence": 0.95,
+  "short_reason": "brief reason"
+}}
 """
 
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_USER_STANCE},
-            {"role": "user", "content": prompt},
-        ],
-    )
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_USER_STANCE},
+                {"role": "user", "content": prompt},
+            ],
+        )
 
-    txt = resp.choices[0].message.content.strip()
+        txt = resp.choices[0].message.content.strip()
+        parsed = safe_parse_user_stance(txt)
+
+    except Exception as e:
+        print("User stance classification failed:", repr(e))
+        return {
+            "stance_label": "neutral_or_mixed",
+            "confidence": 0.0,
+            "short_reason": "api_or_parse_error",
+        }
+
+    allowed = {"pro", "anti", "neutral_or_mixed", "irrelevant"}
+
+    stance = str(parsed.get("stance_label", "neutral_or_mixed")).lower().strip()
+    if stance not in allowed:
+        stance = "neutral_or_mixed"
 
     try:
-        return json.loads(txt)
+        confidence = float(parsed.get("confidence", 0.0))
     except Exception:
-        start = txt.find("{")
-        end = txt.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(txt[start:end + 1])
+        confidence = 0.0
 
     return {
-        "stance_label": "neutral_or_mixed",
-        "confidence": 0.0,
-        "short_reason": "parse_error",
+        "stance_label": stance,
+        "confidence": confidence,
+        "short_reason": str(parsed.get("short_reason", "missing_reason")),
     }
 
 
@@ -344,6 +461,54 @@ def build_pool_topic_only(
     return pool
 
 
+# def build_pool_opposite_stance(
+#     *,
+#     meta: pd.DataFrame,
+#     opposite_stance: str,
+#     K: int,
+#     text_col: str = "comment_text",
+#     stance_col: str = "stance_label",
+#     min_confidence: float = 0.60,
+#     random_seed: int = 42,
+# ) -> List[Dict]:
+#     """
+#     Candidate pool using precomputed stance labels.
+#     Keeps only rows with stance_label == opposite_stance.
+#     """
+
+#     if stance_col not in meta.columns:
+#         raise ValueError(
+#             f"meta missing '{stance_col}'. "
+#             "Use the new GPT-classified meta.parquet with pro/anti labels."
+#         )
+#     else:
+#         labels = meta[stance_col].fillna("").astype(str).str.lower().str.strip()
+#         mask = labels.eq(opposite_stance)
+
+#         if "confidence" in meta.columns:
+#             conf = pd.to_numeric(meta["confidence"], errors="coerce").fillna(0.0)
+#             mask = mask & (conf >= min_confidence)
+
+#         idxs = np.flatnonzero(mask.values)
+
+#     if idxs.size == 0:
+#         print(f"No rows found for opposite stance: {opposite_stance}")
+#         return []
+
+#     rng = np.random.default_rng(random_seed)
+
+#     if idxs.size > K:
+#         idxs = rng.choice(idxs, size=K, replace=False)
+
+#     pool: List[Dict] = []
+
+#     for i in idxs.tolist():
+#         row = meta.iloc[i].to_dict()
+#         row["row_index"] = i
+#         pool.append(row)
+
+#     return pool
+
 def build_pool_opposite_stance(
     *,
     meta: pd.DataFrame,
@@ -356,39 +521,100 @@ def build_pool_opposite_stance(
 ) -> List[Dict]:
     """
     Candidate pool using precomputed stance labels.
-    Keeps only rows with stance_label == opposite_stance.
+    Keeps only rows with stance_label == opposite_stance,
+    then selects the strongest candidates by GPT/diversity scores
+    instead of random sampling.
     """
 
     if stance_col not in meta.columns:
         raise ValueError(
             f"meta missing '{stance_col}'. "
-            "Use the new GPT-classified meta.parquet with pro/anti labels."
+            "Use the GPT-classified meta.parquet with pro/anti labels."
         )
-    else:
-        labels = meta[stance_col].fillna("").astype(str).str.lower().str.strip()
-        mask = labels.eq(opposite_stance)
 
-        if "confidence" in meta.columns:
-            conf = pd.to_numeric(meta["confidence"], errors="coerce").fillna(0.0)
-            mask = mask & (conf >= min_confidence)
+    if text_col not in meta.columns:
+        raise ValueError(f"meta missing text column '{text_col}'.")
 
-        idxs = np.flatnonzero(mask.values)
+    labels = meta[stance_col].fillna("").astype(str).str.lower().str.strip()
+    mask = labels.eq(opposite_stance)
 
-    if idxs.size == 0:
+    if "confidence" in meta.columns:
+        conf = pd.to_numeric(meta["confidence"], errors="coerce").fillna(0.0)
+        mask = mask & (conf >= min_confidence)
+
+    candidate_df = meta.loc[mask].copy()
+
+    if candidate_df.empty:
         print(f"No rows found for opposite stance: {opposite_stance}")
         return []
 
-    rng = np.random.default_rng(random_seed)
+    candidate_df["_row_index"] = candidate_df.index
 
-    if idxs.size > K:
-        idxs = rng.choice(idxs, size=K, replace=False)
+    # These are the best columns you already have.
+    # Higher is better except redundancy_risk, where lower is better.
+    for col in [
+        "gpt_final_score",
+        "keep_score",
+        "persona_usefulness",
+        "coverage_score",
+        "uniqueness_score",
+        "clarity_score",
+        "redundancy_risk",
+        "hnsw_similarity",
+        "topic_candidate_score",
+    ]:
+        if col in candidate_df.columns:
+            candidate_df[col] = pd.to_numeric(candidate_df[col], errors="coerce").fillna(0.0)
+
+    # Build a logical runtime score for choosing NLI candidates.
+    # This favors comments that were already judged useful, clear, unique,
+    # representative, and not redundant.
+    candidate_df["_runtime_pool_score"] = 0.0
+
+    if "gpt_final_score" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 2.0 * candidate_df["gpt_final_score"]
+
+    if "keep_score" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 1.5 * candidate_df["keep_score"]
+
+    if "persona_usefulness" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 1.2 * candidate_df["persona_usefulness"]
+
+    if "coverage_score" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 1.0 * candidate_df["coverage_score"]
+
+    if "uniqueness_score" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 0.8 * candidate_df["uniqueness_score"]
+
+    if "clarity_score" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 0.5 * candidate_df["clarity_score"]
+
+    if "redundancy_risk" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] -= 0.8 * candidate_df["redundancy_risk"]
+
+    if "hnsw_similarity" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 0.5 * candidate_df["hnsw_similarity"]
+
+    if "topic_candidate_score" in candidate_df.columns:
+        candidate_df["_runtime_pool_score"] += 0.3 * candidate_df["topic_candidate_score"]
+
+    # Keep best K instead of random K
+    candidate_df = candidate_df.sort_values(
+        "_runtime_pool_score",
+        ascending=False
+    ).head(K)
 
     pool: List[Dict] = []
 
-    for i in idxs.tolist():
-        row = meta.iloc[i].to_dict()
-        row["row_index"] = i
-        pool.append(row)
+    for _, row in candidate_df.iterrows():
+        r = row.to_dict()
+        r["row_index"] = int(row["_row_index"])
+        pool.append(r)
+
+    print(
+        f"Built opposite-stance pool: stance={opposite_stance}, "
+        f"rows={len(pool)}, selection=score_based"
+    )
 
     return pool
 
@@ -482,7 +708,7 @@ def run_opposite_pipeline_and_render(
     meta,
     #embs, index, encoder,
     # retrieval / ranking knobs
-    pool_size: int = 120,  # 200 #NLI = 120 rows
+    pool_size: int = 60,  # 200 #NLI = 120 rows
     k2_short: int = 8,    # 5 #GPT = 8 rows
     nli_model_name: str = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli",
     use_gpt: bool = True,
