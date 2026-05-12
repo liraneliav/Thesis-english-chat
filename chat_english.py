@@ -20,7 +20,7 @@ load_dotenv()
 if not os.getenv("OPENAI_API_KEY"): #OPENAI_API_KEY
     st.error("OPENAI_API_KEY is missing. Add it to a .env file or your environment.")
     st.stop()
-endpoint = os.getenv("ENDPOINT_URL", "https://ai-asolomon28262ai165132345402.openai.azure.com/")
+endpoint = os.getenv("ENDPOINT_URL")
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 
 # Initialize Azure OpenAI client with key-based authentication
@@ -268,6 +268,7 @@ TOPIC_LABELS  = {"blm": "Black Lives Matter", "guns": "Gun Control", "samesex": 
 
 STAGE_LABELS = {
     "instructions":                     (0,  "Introduction"),
+    "privacy":                          (0,  "Privacy & Data Use"),
     "onboarding_profile":               (1,  "Your Profile"),
     "onboarding_opinions":              (2,  "Your Opinions"),
     "wait_creating_system_prompts_blm": (3,  "Setting Up"),
@@ -688,8 +689,8 @@ def render_instructions():
 
     st.markdown("""
     <div class="ui-hero">
-      <h1>💬 Conversation Research Study</h1>
-      <p>University of Haifa &nbsp;·&nbsp; Thesis Research &nbsp;·&nbsp; English Version</p>
+      <h1>💬 Social Opinion Dialogue Study</h1>
+      <p>English Version</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -730,22 +731,35 @@ def render_instructions():
         "This information is intended for the purpose of discussion only and has not been verified for factual accuracy by the research team. "
     )
 
-    # st.markdown('<div class="ui-card">', unsafe_allow_html=True)
-    st.markdown("#### Privacy & Data Use")
+    st.divider()
+    if st.button("Continue →", type="primary", use_container_width=True):
+        st.session_state.stage = "privacy"
+        st.rerun()
+
+
+def render_privacy():
+    render_stage_progress()
+
+    st.markdown("""
+    <div class="ui-hero">
+      <h1>🔒 Privacy & Data Use</h1>
+      <p>English Version</p>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.markdown(
         "This experiment is part of a scientific research project. "
         "**Your participation is entirely voluntary and is conducted of your own free will**.\n\n"
         "By completing this experiment, you grant us permission to discuss or publish the results in academic forums. "
         "In any future publication, the information will be presented in a way that ensures you cannot be personally identified. "
         "Access to the original raw dataset will be restricted solely to the members of the research team. "
-        "Before any data is shared outside the research team, all potentially identifying information will be removed."
+        "Before any data is shared outside the research team, all potentially identifying information will be removed. "
         "Once de-identified, **the data may be used by the research team or shared with other researchers** for related or future research purposes. "
         "Furthermore, the anonymous data may be made available in online databases, allowing other researchers and interested parties to use the data for future analysis.\n\n"
         "By clicking the button at the bottom of this page, you certify that you are at least 18 years of age and agree to participate in this experiment of your own free will.\n\n"
         "We encourage you to speak freely.\n\n"
         "Thank you very much for your contribution to the thesis research of Liran Eliav, conducted under the supervision of Dr. Adir Solomon, researchers from the University of Haifa.\n\n"
     )
-    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown(
         "<p style='color:#6B7280;font-size:0.9rem'>"
@@ -899,6 +913,13 @@ The user's past comments for this topic are:
 Core behavior:
 - Stay consistent with the stance and reasoning of the background comments.
 - Respond directly to the user's latest message.
+- Always respond with a complete reply. Never return an empty answer.
+
+Conversation boundaries:
+- Stay within the assigned topic: {topic_label}.
+- If the user asks about an unrelated topic, briefly acknowledge it, then redirect the conversation back to {topic_label}.
+- Do not answer unrelated factual questions such as weather, sports, news, personal advice, or technical help.
+- When redirecting, keep the same assigned stance and continue the discussion naturally.
 
 Interaction style:
 - State your position clearly and directly.
@@ -939,6 +960,13 @@ Background comments (do NOT quote them; for internal use only):
 Core requirement:
 - Stay consistent with the stance and logic of the background comment.
 - Respond directly to the user's latest message.
+- Always respond with a complete reply. Never return an empty answer.
+
+Conversation boundaries:
+- Stay within the assigned topic: {topic_label}.
+- If the user asks about an unrelated topic, briefly acknowledge the shift, then gently redirect the conversation back to {topic_label}.
+- Do not answer unrelated factual questions such as weather, sports, news, personal advice, or technical help.
+- When redirecting, use the required NVC-style structure naturally.
 
 Nonviolent Communication (NVC) - REQUIRED:
 In every reply, follow this structure naturally (without naming it):
@@ -1328,7 +1356,12 @@ def render_chat(title, messages_key, base_prompt_key, next_button_label, next_st
                     stop=None,
                     stream=False
                 )
-                assistant_text = resp.choices[0].message.content
+                assistant_text = (resp.choices[0].message.content or "").strip()
+                if not assistant_text:
+                    assistant_text = (
+                        "I want to stay focused on this topic. "
+                        "Can you say more about how you see this issue?"
+                    )
             except Exception as e:
                 assistant_text = f"⚠️ API error: {e}"
 
@@ -1396,7 +1429,12 @@ def render_chat(title, messages_key, base_prompt_key, next_button_label, next_st
                 stop=None,
                 stream=False
             )
-            assistant_text = resp.choices[0].message.content
+            assistant_text = (resp.choices[0].message.content or "").strip()
+            if not assistant_text:
+                assistant_text = (
+                    "I want to stay focused on this topic. "
+                    "Can you say more about how you see this issue?"
+                )
         except Exception as e:
             assistant_text = f"⚠️ API error: {e}"
         typing_placeholder.empty()
@@ -1801,6 +1839,9 @@ stage = st.session_state.stage
 
 if st.session_state.stage == "instructions":
     render_instructions()
+
+elif st.session_state.stage == "privacy":
+    render_privacy()
 
 elif st.session_state.stage == "onboarding_profile":
     render_onboarding_profile()
