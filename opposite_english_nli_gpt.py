@@ -22,6 +22,7 @@ from pathlib import Path
 # Azure OpenAI (official openai package >= 1.0)
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
 
 #from opposite_english_nli import load_english, other_comments_same_author_same_topic  
 
@@ -43,10 +44,14 @@ else:
 endpoint = os.getenv("ENDPOINT_URL")
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 
-client = AzureOpenAI(
-    azure_endpoint=endpoint,
-    api_key=subscription_key,
-    api_version="2025-01-01-preview",
+# client = AzureOpenAI(
+#     azure_endpoint=endpoint,
+#     api_key=subscription_key,
+#     api_version="2025-01-01-preview",
+# )
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
 )
 
 import requests
@@ -91,6 +96,14 @@ def gpt_rerank_contradiction(
     for s in range(0, len(candidates), batch_size):
         batch = candidates[s:s+batch_size]
         compact = [{"id": c["id"], "text": c["text"], "topic": c.get("topic","")} for c in batch]
+        # compact = [
+        #     {
+        #         "id": c["id"],
+        #         "text": str(c["text"])[:600],
+        #         "topic": c.get("topic", "")
+        #     }
+        #     for c in batch
+        # ]
         msg_user = (
             "User opinion (premise):\n"
             + user_opinion.strip()
@@ -131,10 +144,21 @@ def gpt_rerank_contradiction(
     return enriched
 
 SYSTEM_USER_STANCE = """\
-You are a careful stance classifier.
-Classify the user's opinion toward the given topic.
+You are a careful stance classifier for a controlled experiment.
+
+Important context:
+The user's text was written inside a specific topic field. Therefore, assume the user is talking about the given topic, even if they do not explicitly repeat the topic name.
+
+Classify the user's stance toward the given topic.
 Return strict JSON only:
 {"stance_label": "pro" | "anti" | "neutral_or_mixed" | "irrelevant", "confidence": 0.0-1.0, "short_reason": "..."}
+
+Rules:
+- If the user says the topic is important, needed, necessary, good, right, or should exist, classify as pro.
+- If the user says the topic is bad, nonsense, stupid, harmful, unnecessary, or should not exist, classify as anti.
+- Do not mark as neutral only because the sentence is short.
+- Use neutral_or_mixed only when the stance is genuinely unclear or balanced.
+- Use irrelevant only when the text is clearly about a different topic.
 """
 
 def topic_definition_for_user(topic_key: str) -> str:
@@ -270,24 +294,39 @@ def classify_user_stance_with_gpt(
     model: str = "gpt-5-mini",
 ) -> dict:
     prompt = f"""
-{topic_definition_for_user(topic_key)}
+    {topic_definition_for_user(topic_key)}
 
-User opinion:
-{user_opinion}
+    Context:
+    This opinion was written by the user in the input field for this exact topic: {topic_key}.
+    Assume the user is referring to this topic, even if the topic name is not repeated in the sentence.
 
-Classify the user's stance toward the topic.
+    User opinion:
+    {user_opinion}
 
-Return ONLY valid JSON.
-Do not include markdown.
-Do not include explanation outside the JSON.
+    Task:
+    Classify the user's stance toward this topic.
 
-Required format:
-{{
-  "stance_label": "pro",
-  "confidence": 0.95,
-  "short_reason": "brief reason"
-}}
-"""
+    Interpretation examples:
+    - "super important" = pro
+    - "very important" = pro
+    - "we need this" = pro
+    - "I support it" = pro
+    - "nonsense" = anti
+    - "stupid movement" = anti
+    - "this is useless" = anti
+    - "I don't know" = neutral_or_mixed
+
+    Return ONLY valid JSON.
+    Do not include markdown.
+    Do not include explanation outside the JSON.
+
+    Required format:
+    {{
+    "stance_label": "pro",
+    "confidence": 0.95,
+    "short_reason": "brief reason"
+    }}
+    """
 
     try:
         resp = client.chat.completions.create(
