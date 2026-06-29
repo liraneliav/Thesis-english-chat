@@ -27,7 +27,7 @@ subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 client = AzureOpenAI(
     azure_endpoint=endpoint,
     api_key=subscription_key,
-    api_version="2024-12-01-preview",
+    api_version="2024-12-01-preview",#"2025-01-01-preview",
 )
 
 # @st.cache_resource(show_spinner=False)
@@ -116,9 +116,9 @@ def load_english(
 @st.cache_resource(show_spinner=False)
 def load_topic_dataset(topic: str):
     topic_map = {
-        "blm": ("./english_blm", "Liran73/english-blm"),
+        #"blm": ("./english_blm", "Liran73/english-blm"),
         "guns": ("./english_guns", "Liran73/english-guns"),
-        "samesex": ("./english_samesex", "Liran73/english-samesex"),
+        #"samesex": ("./english_samesex", "Liran73/english-samesex"),
     }
 
     local_dir, repo_id = topic_map[topic]
@@ -154,9 +154,9 @@ EDUCATION_LEVELS = [
 
 QUESTIONS = [
     {"id": "name",        "label": "Choose a nickname for yourself"},
-    {"id": "black",       "label": "What is your opinion on the topic of 'Black Lives Matter'?"},
+    #{"id": "black",       "label": "What is your opinion on the topic of 'Black Lives Matter'?"},
     {"id": "guns",        "label": "What is your opinion on the topic of 'Gun Control'?"},
-    {"id": "same-sex",    "label": "What is your opinion on the topic of 'Same-Sex Marriage Legalization'?"},
+    #{"id": "same-sex",    "label": "What is your opinion on the topic of 'Same-Sex Marriage Legalization'?"},
 ]
 
 SURVEY_chat = [
@@ -181,7 +181,7 @@ SURVEY_finish = [
     {"id": "feedback",    "label": "Open feedback (what stood out, suggestions, etc.)", "type": "text"},
 ]
 
-MAX_TURNS = 7
+MAX_TURNS = 2
 
 system_prompt_chat1_blm = ""
 system_prompt_chat1_guns = ""
@@ -211,30 +211,30 @@ def init_state():
     ss.setdefault("topic_order", None)
     if ss.topic_order is None:
         # random order once per browser session
-        ss.topic_order = random.sample(["blm", "guns", "samesex"], k=3)
+        ss.topic_order = ["guns"]#random.sample(["blm", "guns", "samesex"], k=3)
 
     ss.setdefault("stage", "instructions")
     ss.setdefault("model", "gpt-5-mini")
     ss.setdefault("temperature", 0.8)
 
     # base prompts
-    ss.setdefault("system_prompt_chat1_blm", system_prompt_chat1_blm)
+    #ss.setdefault("system_prompt_chat1_blm", system_prompt_chat1_blm)
     ss.setdefault("system_prompt_chat1_guns", system_prompt_chat1_guns)
-    ss.setdefault("system_prompt_chat1_samesex", system_prompt_chat1_samesex)
-    ss.setdefault("system_prompt_chat2_blm", system_prompt_chat2_blm)
+    #ss.setdefault("system_prompt_chat1_samesex", system_prompt_chat1_samesex)
+    #ss.setdefault("system_prompt_chat2_blm", system_prompt_chat2_blm)
     ss.setdefault("system_prompt_chat2_guns", system_prompt_chat2_guns)
-    ss.setdefault("system_prompt_chat2_samesex", system_prompt_chat2_samesex)
+    #ss.setdefault("system_prompt_chat2_samesex", system_prompt_chat2_samesex)
 
     # onboarding profile (answers)
     ss.setdefault("profile", {})
 
     # chats: messages start as None so we can compose system prompts with profile on first entry
-    ss.setdefault("chat1_messages_blm", None)
+    #ss.setdefault("chat1_messages_blm", None)
     ss.setdefault("chat1_messages_guns", None)
-    ss.setdefault("chat1_messages_samesex", None)
-    ss.setdefault("chat2_messages_blm", None)
+    #ss.setdefault("chat1_messages_samesex", None)
+    #ss.setdefault("chat2_messages_blm", None)
     ss.setdefault("chat2_messages_guns", None)
-    ss.setdefault("chat2_messages_samesex", None)
+    #ss.setdefault("chat2_messages_samesex", None)
 
     # survey answers
     ss.setdefault("survey_1", {})
@@ -249,9 +249,9 @@ def init_state():
     ss.setdefault("chat_number_start", random.randint(1, 2))
     print(f"first chat number = {st.session_state.chat_number_start}")
 
-    ss.setdefault("meta_blm", None)
+    #ss.setdefault("meta_blm", None)
     ss.setdefault("meta_guns", None)
-    ss.setdefault("meta_samesex", None)
+    #ss.setdefault("meta_samesex", None)
     # ss.setdefault("embs", None)
     # ss.setdefault("index", None)
     # ss.setdefault("encoder", None)
@@ -271,26 +271,26 @@ STAGE_LABELS = {
     "privacy":                          (0,  "Privacy & Data Use"),
     "onboarding_profile":               (1,  "Your Profile"),
     "onboarding_opinions":              (2,  "Your Opinions"),
-    "wait_creating_system_prompts_blm": (3,  "Setting Up"),
-    "chat1_blm":                        (3,  "Chat 1 · Black Lives Matter"),
-    "wait_creating_system_prompts_guns":(4,  "Setting Up"),
-    "chat1_guns":                       (4,  "Chat 1 · Gun Control"),
-    "wait_creating_system_prompts_samesex": (5, "Setting Up"),
-    "chat1_samesex":                    (5,  "Chat 1 · Same-Sex Marriage"),
-    "survey1":                          (6,  "Mid-Point Survey"),
-    "wait_chat2_blm":                   (7,  "Setting Up"),
-    "chat2_blm":                        (7,  "Chat 2 · Black Lives Matter"),
-    "wait_chat2_guns":                  (8,  "Setting Up"),
-    "chat2_guns":                       (8,  "Chat 2 · Gun Control"),
-    "wait_chat2_samesex":               (9,  "Setting Up"),
-    "chat2_samesex":                    (9,  "Chat 2 · Same-Sex Marriage"),
-    "survey2":                          (10, "Mid-Point Survey"),
-    "full_survey":                      (11, "Final Survey"),
-    "due_disclosure":                   (12, "Disclosure"),
-    "thanks":                           (13, "Complete"),
-    "not_save":                         (13, "Complete"),
+    #"wait_creating_system_prompts_blm": (3,  "Setting Up"),
+    #"chat1_blm":                        (3,  "Chat 1 · Black Lives Matter"),
+    "wait_creating_system_prompts_guns":(3,  "Setting Up"),
+    "chat1_guns":                       (3,  "Chat 1 · Gun Control"),
+    #"wait_creating_system_prompts_samesex": (5, "Setting Up"),
+    #"chat1_samesex":                    (5,  "Chat 1 · Same-Sex Marriage"),
+    "survey1":                          (4,  "Mid-Point Survey"),
+    #"wait_chat2_blm":                   (7,  "Setting Up"),
+    #"chat2_blm":                        (7,  "Chat 2 · Black Lives Matter"),
+    "wait_chat2_guns":                  (5,  "Setting Up"),
+    "chat2_guns":                       (5,  "Chat 2 · Gun Control"),
+    #"wait_chat2_samesex":               (9,  "Setting Up"),
+    #"chat2_samesex":                    (9,  "Chat 2 · Same-Sex Marriage"),
+    "survey2":                          (6, "Mid-Point Survey"),
+    "full_survey":                      (7, "Final Survey"),
+    "due_disclosure":                   (8, "Disclosure"),
+    "thanks":                           (9, "Complete"),
+    "not_save":                         (9, "Complete"),
 }
-TOTAL_STEPS = 13
+TOTAL_STEPS = 9#13
 
 
 def inject_global_css():
@@ -710,17 +710,17 @@ def render_instructions():
       <div style="background:#F5F6FF;border-radius:12px;padding:1rem;border:1px solid #E8EAFF">
         <div style="font-size:1.4rem;margin-bottom:0.3rem">🗣️</div>
         <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Share your views</div>
-        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will be asked to share your opinions on three different topics.</div>
+        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will be asked to share your opinion on one spesific topic.</div>
       </div>
       <div style="background:#F5F6FF;border-radius:12px;padding:1rem;border:1px solid #E8EAFF">
         <div style="font-size:1.4rem;margin-bottom:0.3rem">💬</div>
-        <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Six conversations</div>
-        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will participate in a series of conversations with a conversation partner (interlocutor). For each of the three topics, you will engage in two separate conversations.</div>
+        <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Two conversations</div>
+        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will participate in a series of conversations with a conversation partner (interlocutor). You will engage in two separate conversations.</div>
       </div>
       <div style="background:#F5F6FF;border-radius:12px;padding:1rem;border:1px solid #E8EAFF">
         <div style="font-size:1.4rem;margin-bottom:0.3rem">📝</div>
         <div style="font-weight:600;font-size:0.9rem;color:#1A1A2E">Short surveys</div>
-        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will be asked to complete a short survey after every three conversations, and a comprehensive summary survey upon completion of all six sessions.</div>
+        <div style="font-size:0.82rem;color:#6B7280;margin-top:2px">You will be asked to complete a short survey after every conversation, and a comprehensive summary survey upon completion of all two sessions.</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -854,12 +854,12 @@ def render_onboarding_opinions():
     with st.form("opinions_form", clear_on_submit=False):
         opinions = st.session_state.profile.get("opinions", {})
 
-        st.markdown(
-            '<div style="border-left:4px solid #6C63FF;padding-left:1rem;margin-bottom:0.25rem">'
-            '<strong>Black Lives Matter\n</strong></div>',
-            unsafe_allow_html=True
-        )
-        blm = st.text_area("What is your opinion on the topic of 'Black Lives Matter'? *", value=opinions.get("blm", ""), height=140, max_chars=800)
+        # st.markdown(
+        #     '<div style="border-left:4px solid #6C63FF;padding-left:1rem;margin-bottom:0.25rem">'
+        #     '<strong>Black Lives Matter\n</strong></div>',
+        #     unsafe_allow_html=True
+        # )
+        #blm = st.text_area("What is your opinion on the topic of 'Black Lives Matter'? *", value=opinions.get("blm", ""), height=140, max_chars=800)
 
         st.markdown(
             '<div style="border-left:4px solid #00B4D8;padding-left:1rem;margin-bottom:0.25rem;margin-top:1rem">'
@@ -868,28 +868,28 @@ def render_onboarding_opinions():
         )
         guns = st.text_area("What is your opinion on the topic of 'Gun Control'? *", value=opinions.get("guns", ""), height=140, max_chars=800)
 
-        st.markdown(
-            '<div style="border-left:4px solid #10B981;padding-left:1rem;margin-bottom:0.25rem;margin-top:1rem">'
-            '<strong>Same-Sex Marriage Legalization</strong></div>',
-            unsafe_allow_html=True
-        )
-        samesex = st.text_area("What is your opinion on the topic of 'Same-Sex Marriage Legalization'? *", value=opinions.get("samesex", ""), height=140, max_chars=800)
+        # st.markdown(
+        #     '<div style="border-left:4px solid #10B981;padding-left:1rem;margin-bottom:0.25rem;margin-top:1rem">'
+        #     '<strong>Same-Sex Marriage Legalization</strong></div>',
+        #     unsafe_allow_html=True
+        # )
+        #samesex = st.text_area("What is your opinion on the topic of 'Same-Sex Marriage Legalization'? *", value=opinions.get("samesex", ""), height=140, max_chars=800)
 
         next_btn = st.form_submit_button("Finish with my opinions", type="primary", use_container_width=True)
 
         if next_btn:
             errs = []
-            if not blm.strip(): errs.append("Black Lives Matter")
+            #if not blm.strip(): errs.append("Black Lives Matter")
             if not guns.strip(): errs.append("Gun control")
-            if not samesex.strip(): errs.append("Same-sex marriage legalization")
+            #if not samesex.strip(): errs.append("Same-sex marriage legalization")
 
             if errs:
                 st.error("Please write your opinion for: " + ", ".join(errs))
             else:
                 st.session_state.profile["opinions"] = {
-                    "blm": blm.strip(),
+                    #"blm": blm.strip(),
                     "guns": guns.strip(),
-                    "samesex": samesex.strip(),
+                    #"samesex": samesex.strip(),
                 }
 
                 #st.session_state.stage = "wait_creating_system_prompts_blm"
@@ -1811,7 +1811,7 @@ def _next_stage_after_chat(chat_slot: str, topic: str) -> str:
     chat_slot: "chat1_messages" or "chat2_messages" (same strings you pass into render_chat)
     topic: "blm" / "guns" / "samesex"
     """
-    order = st.session_state.get("topic_order") or ["blm", "guns", "samesex"]
+    order = ["guns"]#st.session_state.get("topic_order") or ["blm", "guns", "samesex"]
     try:
         i = order.index(topic)
     except ValueError:
@@ -1832,7 +1832,7 @@ def _next_stage_after_chat(chat_slot: str, topic: str) -> str:
     raise ValueError(f"Unknown chat_slot: {chat_slot}")
 
 def _first_chat2_wait_stage() -> str:
-    order = st.session_state.get("topic_order") or ["blm", "guns", "samesex"]
+    order = ["guns"]#st.session_state.get("topic_order") or ["blm", "guns", "samesex"]
     return f"wait_chat2_{order[0]}"
 
 stage = st.session_state.stage
@@ -1848,19 +1848,19 @@ elif st.session_state.stage == "onboarding_profile":
 elif st.session_state.stage == "onboarding_opinions":
     render_onboarding_opinions()
 
-elif st.session_state.stage == "wait_creating_system_prompts_blm":
-    build_chat_env_blm()
+# elif st.session_state.stage == "wait_creating_system_prompts_blm":
+#     build_chat_env_blm()
 
-elif (st.session_state.chat_number_start == 1) and (stage == "chat1_blm"):
-            render_chat(
-                title=f"First conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
-                messages_key="chat1_messages_blm",
-                base_prompt_key="system_prompt_chat1_blm",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat1_messages", "blm"),
-                key="blm",
-                topic="blm",
-            )
+# elif (st.session_state.chat_number_start == 1) and (stage == "chat1_blm"):
+#             render_chat(
+#                 title=f"First conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
+#                 messages_key="chat1_messages_blm",
+#                 base_prompt_key="system_prompt_chat1_blm",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat1_messages", "blm"),
+#                 key="blm",
+#                 topic="blm",
+#             )
 
 elif (st.session_state.chat_number_start == 1) and (st.session_state.stage == "wait_creating_system_prompts_guns"):
         build_chat_env_guns()
@@ -1876,41 +1876,41 @@ elif (st.session_state.chat_number_start == 1) and (stage == "chat1_guns"):
                 topic="guns",
             )
 
-elif (st.session_state.chat_number_start == 1) and (st.session_state.stage == "wait_creating_system_prompts_samesex"):
-        build_chat_env_samesex()
+# elif (st.session_state.chat_number_start == 1) and (st.session_state.stage == "wait_creating_system_prompts_samesex"):
+#         build_chat_env_samesex()
 
-elif (st.session_state.chat_number_start == 1) and (stage == "chat1_samesex"):
-            render_chat(
-                title=f"First Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
-                messages_key="chat1_messages_samesex",
-                base_prompt_key="system_prompt_chat1_samesex",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat1_messages", "samesex"),
-                key="samesex",
-                topic="samesex",
-            )
+# elif (st.session_state.chat_number_start == 1) and (stage == "chat1_samesex"):
+#             render_chat(
+#                 title=f"First Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
+#                 messages_key="chat1_messages_samesex",
+#                 base_prompt_key="system_prompt_chat1_samesex",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat1_messages", "samesex"),
+#                 key="samesex",
+#                 topic="samesex",
+#             )
 
 elif (st.session_state.chat_number_start == 1) and (stage == "survey1"):
         # require Chat 1 completion
-        if user_turns(st.session_state.chat1_messages_samesex or []) < MAX_TURNS:
-            st.warning("Please complete Chat 1 first.")
+        # if user_turns(st.session_state.chat1_messages_samesex or []) < MAX_TURNS:
+        #     st.warning("Please complete Chat 1 first.")
 
-        else:
+        # else:
             render_survey_chat_1(_first_chat2_wait_stage(), "Continue to the second conversation")
 
-elif (st.session_state.chat_number_start == 1) and (stage == "wait_chat2_blm"):
-        build_chat_env_blm_chat2()
+# elif (st.session_state.chat_number_start == 1) and (stage == "wait_chat2_blm"):
+#         build_chat_env_blm_chat2()
 
-elif (st.session_state.chat_number_start == 1) and (stage == "chat2_blm"):
-            render_chat(
-                title=f"Second conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
-                messages_key="chat2_messages_blm",
-                base_prompt_key="system_prompt_chat2_blm",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat2_messages", "blm"),
-                key="blm",
-                topic="blm",
-            )
+# elif (st.session_state.chat_number_start == 1) and (stage == "chat2_blm"):
+#             render_chat(
+#                 title=f"Second conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
+#                 messages_key="chat2_messages_blm",
+#                 base_prompt_key="system_prompt_chat2_blm",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat2_messages", "blm"),
+#                 key="blm",
+#                 topic="blm",
+#             )
 
 elif (st.session_state.chat_number_start == 1) and (stage == "wait_chat2_guns"):
         build_chat_env_guns_chat2()
@@ -1927,27 +1927,27 @@ elif (st.session_state.chat_number_start == 1) and (stage == "chat2_guns"):
                 topic="guns",
             )
 
-elif (st.session_state.chat_number_start == 1) and (stage == "wait_chat2_samesex"):
-        build_chat_env_samesex_chat2()
+# elif (st.session_state.chat_number_start == 1) and (stage == "wait_chat2_samesex"):
+#         build_chat_env_samesex_chat2()
 
-elif (st.session_state.chat_number_start == 1) and (stage == "chat2_samesex"):
-            #st.session_state.chat2_messages = None
-            render_chat(
-                title=f"Second Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
-                messages_key="chat2_messages_samesex",
-                base_prompt_key="system_prompt_chat2_samesex",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat2_messages", "samesex"),
-                key="samesex",
-                topic="samesex",
-            )
+# elif (st.session_state.chat_number_start == 1) and (stage == "chat2_samesex"):
+#             #st.session_state.chat2_messages = None
+#             render_chat(
+#                 title=f"Second Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
+#                 messages_key="chat2_messages_samesex",
+#                 base_prompt_key="system_prompt_chat2_samesex",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat2_messages", "samesex"),
+#                 key="samesex",
+#                 topic="samesex",
+#             )
 
 elif (st.session_state.chat_number_start == 1) and (stage == "survey2"):
         # require Chat 2 completion
-        if user_turns(st.session_state.chat2_messages_samesex or []) < MAX_TURNS:
-            st.warning("Please complete Chat 2 first.")
+        # if user_turns(st.session_state.chat2_messages_samesex or []) < MAX_TURNS:
+        #     st.warning("Please complete Chat 2 first.")
 
-        else:
+        # else:
             #st.session_state.survey = None
             render_survey_chat_2("full_survey", "Continue to the final survey" )
 
@@ -1965,16 +1965,16 @@ elif (st.session_state.chat_number_start == 1) and (stage == "not_save"):
         # require full survey completion
         render_not_save()
 
-elif (st.session_state.chat_number_start == 2) and (stage == "chat1_blm"):
-            render_chat(
-                title=f"First conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
-                messages_key="chat1_messages_blm",
-                base_prompt_key="system_prompt_chat2_blm",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat1_messages", "blm"),
-                key="blm",
-                topic="blm",
-            )
+# elif (st.session_state.chat_number_start == 2) and (stage == "chat1_blm"):
+#             render_chat(
+#                 title=f"First conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
+#                 messages_key="chat1_messages_blm",
+#                 base_prompt_key="system_prompt_chat2_blm",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat1_messages", "blm"),
+#                 key="blm",
+#                 topic="blm",
+#             )
 
 elif (st.session_state.chat_number_start == 2) and (st.session_state.stage == "wait_creating_system_prompts_guns"):
         build_chat_env_guns()
@@ -1990,41 +1990,41 @@ elif (st.session_state.chat_number_start == 2) and (stage == "chat1_guns"):
                 topic="guns",
             )
 
-elif (st.session_state.chat_number_start == 2) and (st.session_state.stage == "wait_creating_system_prompts_samesex"):
-        build_chat_env_samesex()
+# elif (st.session_state.chat_number_start == 2) and (st.session_state.stage == "wait_creating_system_prompts_samesex"):
+#         build_chat_env_samesex()
 
-elif (st.session_state.chat_number_start == 2) and (stage == "chat1_samesex"):
-            render_chat(
-                title=f"First Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
-                messages_key="chat1_messages_samesex",
-                base_prompt_key="system_prompt_chat2_samesex",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat1_messages", "samesex"),
-                key="samesex",
-                topic="samesex",
-            )
+# elif (st.session_state.chat_number_start == 2) and (stage == "chat1_samesex"):
+#             render_chat(
+#                 title=f"First Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
+#                 messages_key="chat1_messages_samesex",
+#                 base_prompt_key="system_prompt_chat2_samesex",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat1_messages", "samesex"),
+#                 key="samesex",
+#                 topic="samesex",
+#             )
 
 elif (st.session_state.chat_number_start == 2) and (stage == "survey1"):
         # require Chat 1 completion
-        if user_turns(st.session_state.chat1_messages_samesex or []) < MAX_TURNS:
-            st.warning("Please complete the chat first.")
+        # if user_turns(st.session_state.chat1_messages_samesex or []) < MAX_TURNS:
+        #     st.warning("Please complete the chat first.")
 
-        else:
+        # else:
             render_survey_chat_1(_first_chat2_wait_stage(), "Continue to the second conversation")
 
-elif (st.session_state.chat_number_start == 2) and (stage == "wait_chat2_blm"):
-        build_chat_env_blm_chat2()
+# elif (st.session_state.chat_number_start == 2) and (stage == "wait_chat2_blm"):
+#         build_chat_env_blm_chat2()
 
-elif (st.session_state.chat_number_start == 2) and (stage == "chat2_blm"):
-            render_chat(
-                title=f"Second conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
-                messages_key="chat2_messages_blm",
-                base_prompt_key="system_prompt_chat1_blm",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat2_messages", "blm"),
-                key="blm",
-                topic="blm",
-            )
+# elif (st.session_state.chat_number_start == 2) and (stage == "chat2_blm"):
+#             render_chat(
+#                 title=f"Second conversation about 'Black Lives Matter' (you have {MAX_TURNS} turns)",
+#                 messages_key="chat2_messages_blm",
+#                 base_prompt_key="system_prompt_chat1_blm",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat2_messages", "blm"),
+#                 key="blm",
+#                 topic="blm",
+#             )
 
 elif (st.session_state.chat_number_start == 2) and (stage == "wait_chat2_guns"):
         build_chat_env_guns_chat2()
@@ -2041,27 +2041,27 @@ elif (st.session_state.chat_number_start == 2) and (stage == "chat2_guns"):
                 topic="guns",
             )
 
-elif (st.session_state.chat_number_start == 2) and (stage == "wait_chat2_samesex"):
-        build_chat_env_samesex_chat2()
+# elif (st.session_state.chat_number_start == 2) and (stage == "wait_chat2_samesex"):
+#        build_chat_env_samesex_chat2()
 
-elif (st.session_state.chat_number_start == 2) and (stage == "chat2_samesex"):
-            #st.session_state.chat2_messages = None
-            render_chat(
-                title=f"Second Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
-                messages_key="chat2_messages_samesex",
-                base_prompt_key="system_prompt_chat1_samesex",
-                next_button_label="Click to continue",
-                next_stage=_next_stage_after_chat("chat2_messages", "samesex"),
-                key="samesex",
-                topic="samesex",
-            )
+# elif (st.session_state.chat_number_start == 2) and (stage == "chat2_samesex"):
+#             #st.session_state.chat2_messages = None
+#             render_chat(
+#                 title=f"Second Conversation on 'Same-Sex Marriage Legalization' (You have {MAX_TURNS} turns)",
+#                 messages_key="chat2_messages_samesex",
+#                 base_prompt_key="system_prompt_chat1_samesex",
+#                 next_button_label="Click to continue",
+#                 next_stage=_next_stage_after_chat("chat2_messages", "samesex"),
+#                 key="samesex",
+#                 topic="samesex",
+#             )
 
 elif (st.session_state.chat_number_start == 2) and (stage == "survey2"):
         # require Chat 2 completion
-        if user_turns(st.session_state.chat2_messages_samesex or []) < MAX_TURNS:
-            st.warning("Please complete the chat first.")
+        # if user_turns(st.session_state.chat2_messages_samesex or []) < MAX_TURNS:
+        #     st.warning("Please complete the chat first.")
 
-        else:
+        # else:
             #st.session_state.survey = None
             render_survey_chat_2("full_survey", "Continue to the final survey" )
 
