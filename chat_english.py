@@ -181,7 +181,7 @@ SURVEY_finish = [
     {"id": "feedback",    "label": "Open feedback (what stood out, suggestions, etc.)", "type": "text"},
 ]
 
-MAX_TURNS = 2
+MAX_TURNS = 7
 
 system_prompt_chat1_blm = ""
 system_prompt_chat1_guns = ""
