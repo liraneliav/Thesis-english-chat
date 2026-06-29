@@ -793,7 +793,7 @@ def render_onboarding_profile():
         profile = st.session_state.profile
 
          # nickname
-        nickname = st.text_input("Nickname *", value=profile.get("nickname", ""))
+        nickname = st.text_input("Nickname (Prolific ID)*", value=profile.get("nickname", ""))
 
         # selectboxes with a BLANK default (placeholder at index 0)
         def _idx_or_placeholder(value, options):
